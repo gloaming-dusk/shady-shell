@@ -12,7 +12,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 
-#include "../ipc/json.h"
+#include "ipc/json.h"
 #include "script.h"
 #include "shell.h"
 
