@@ -2,8 +2,8 @@
 
 `shady-shell` draws whatever its Lua config describes. The default desktop is
 itself a config, [`rices/tide/shell.lua`](https://github.com/gloaming-dusk/gloam/blob/main/rices/tide/shell.lua), and so is
-the plainer [`default.lua`](../default.lua). Read either alongside
-this page.
+the shell's own [`default.lua`](../default.lua), Meridian. Read either
+alongside this page.
 
 ## Config file
 
@@ -158,6 +158,7 @@ Widgets are tables; these constructors fill in `type`:
 | `shell.text(text, {...})` | A line of text. |
 | `shell.pip{radius=, lit=}` | The focus dot: a glowing dot when lit, a faint ring otherwise. |
 | `shell.image{path=, width=, height=}` | A PNG. |
+| `shell.canvas{...}` | Vector shapes drawn in the widget's own coordinates: lines, rectangles, circles, arcs and paths (see Canvas). |
 | `shell.spacer{...}` | An empty box that grows (or has a fixed `width`/`height`). |
 
 Children may contain `false` (skipped, so `cond and widget or false`
@@ -190,7 +191,7 @@ backdrop with all four 0); otherwise `justify` places it horizontally and
 
 | Property | |
 |---|---|
-| `background` | colour or `shell.gradient(direction, c1, c2[, c3, c4])`, direction `"vertical"`, `"horizontal"` or `"diagonal"` |
+| `background` | colour or `shell.gradient(direction, c1, c2[, c3, c4])`, direction `"vertical"`, `"horizontal"`, `"diagonal"` or `"radial"` (from the centre of the box out to its edges) |
 | `border`, `border_width` | hairline outline (width 1 by default) |
 | `radius` | corner radius |
 | `color` | text colour (text and pip) |
@@ -198,7 +199,7 @@ backdrop with all four 0); otherwise `justify` places it horizontally and
 | `scale` | drawing scale about the widget's centre, default 1 |
 | `rotate` | drawing rotation about the widget's centre, in degrees clockwise |
 | `translate` | `{x, y}` drawing offset in pixels |
-| `shadow` | `{x, y, colour}`: a hard copy of the widget's shape, offset behind it; `false` for none |
+| `shadow` | `{x, y, colour[, blur]}`: a copy of the widget's shape, offset behind it: hard, or soft over `blur` pixels (up to 96). With no offset a blurred shadow is a glow. `false` for none |
 | `hover` | a table of style properties used while the pointer is over the widget |
 | `font` | Pango font, e.g. `"Sans SemiBold 9.5"`; default `"Sans Medium 9.5"` |
 | `letter_spacing` | points, default 0.25 |
@@ -217,7 +218,8 @@ Views return a new tree on every repaint; an animated widget is matched
 with its previous self and springs from its old look to its new one.
 Position and size (relative to the parent, so children ride along with a
 moving parent), `background` (gradients included), `border`, `color`,
-`opacity`, `scale`, `rotate`, `translate` and `shadow` all animate.
+`opacity`, `scale`, `rotate`, `translate` and `shadow` (its blur too) all
+animate.
 
 | Property | |
 |---|---|
@@ -241,6 +243,57 @@ shell.row {
 While springs move, the shell repaints on every frame from the last tree
 without running the view; when they settle it goes back to repainting only
 on changes.
+
+A shadow is drawn outside the widget, and a surface shows nothing past its
+own edge: give a popup's card `padding` around it for its shadow to fall
+in, and `input = "widgets"` so that the empty margin does not take clicks
+(the default UI's `panel` does both).
+
+### Canvas
+
+`shell.canvas` draws vector shapes, for what boxes and text cannot say: a
+dial, a gauge, a graph, a mark. Its array part lists the shapes, drawn in
+order, in logical pixels from the widget's top left corner:
+
+```lua
+shell.canvas {
+    width = 64, height = 64,
+    { "circle", 32, 32, 28, stroke = "#ffffff30", width = 4 },
+    { "arc", 32, 32, 28, 0, 3.6 * percent, stroke = t.accent, width = 4, cap = "round" },
+    { "line", 32, 32, 32, 12, stroke = t.text, width = 2, cap = "round" },
+    { "path", "M 8 56 Q 32 40 56 56", stroke = t.text_dim },
+}
+```
+
+| Shape | |
+|---|---|
+| `{"line", x1, y1, x2, y2}` | a straight line |
+| `{"rect", x, y, width, height, radius = n}` | a rectangle, with rounded corners if `radius` is set |
+| `{"circle", cx, cy, r}` | a circle |
+| `{"arc", cx, cy, r, from, to}` | part of a circle, in degrees clockwise from 12 o'clock; filled, it is closed along its chord |
+| `{"path", "M 0 8 L 4 0 C ... Z"}` | an SVG-style path: `M`, `L`, `H`, `V`, `C`, `Q` and `Z`, and their relative lower-case forms |
+
+| Shape property | |
+|---|---|
+| `fill`, `stroke` | a colour or a `shell.gradient` (spanning the shape's own extent), or `true` for the widget's `color`, which follows `hover` and animation. A shape with neither is stroked in the widget's colour |
+| `width` | stroke width, default 1 |
+| `cap` | `"round"` for round ends and joins |
+| `dash` | `{on, off}` lengths, or one number for both |
+| `opacity` | 0..1 for this shape |
+
+With `view = {width, height}` the shapes are drawn in a box of that size,
+scaled to the widget, so one drawing fits any size (an icon in a 24-unit
+box, like the built-in ones). A canvas takes its size from `width` and
+`height` or from its container (pinned in a `stack`, for instance); what
+falls outside it is not drawn. `false` among the shapes is skipped and a
+list of shapes is spliced in, as with children.
+
+A canvas is part of the widget tree like any other widget: it is repainted
+only when its shapes change, costs nothing while idle, and takes `opacity`,
+`scale`, `translate`, `rotate`, `shadow`, `hover` and `animate` as a whole.
+The default UI draws its day line, the sun on it and the day wave of its
+clock sheet with canvases; [`examples/sysinfo.lua`](../examples/sysinfo.lua)
+draws a load dial.
 
 ### Interaction
 
@@ -334,7 +387,7 @@ Window arguments may also be the window tables themselves.
 | `shell.toggle_shortcuts()` | ask the compositor to toggle the shortcut overlay; false when not connected |
 | `shell.screenshot([delay_ms])` | ask the compositor to save its next frame, after the delay, to `~/Pictures` (the IPC `screenshot` command; needs no grim); the `value` event with `screenshot.saved` follows once it is written. Give a closing panel ~300 ms to leave the picture |
 | `shell.notify(summary[, body[, app]])` | show a notification of the shell's own, like one a client sent |
-| `shell.fonts(dir)` | make the font files in `dir` (relative to the config file) available by family name; call it before the views use them |
+| `shell.fonts(dir)` | make the font files in `dir` (relative to the config file, or absolute) available by family name; call it before the views use them. The data directory's `fonts` holds Manrope and Instrument Serif, which the default UI is set in: `shell.fonts(shell.data_dir .. "/fonts")` |
 | `shell.data_dir`, `shell.config_path` | where the default UI and your config live |
 
 `shell.poll` and `shell.listen` start their command the first time a view

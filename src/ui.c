@@ -14,6 +14,9 @@
 #define UI_MAX_DEPTH 48
 #define UI_MAX_NODES 4096
 #define IMAGE_CACHE 32
+#define UI_MAX_SHAPES 1024
+#define UI_MAX_PATH 4096 /* numbers in one path */
+#define UI_MAX_BLUR 96.0
 
 /* ---- colours ---------------------------------------------------------- */
 
@@ -117,34 +120,37 @@ static bool get_color(struct build *b, int t, const char *key, double rgba[4]) {
     return ok;
 }
 
-/* A solid colour or {gradient = "vertical"|"horizontal"|"diagonal", c1, c2, ...}. */
+/* The paint on top of the stack: a solid colour or {gradient = "vertical" |
+ * "horizontal" | "diagonal" | "radial", c1, c2, ...}. */
+static bool read_paint(lua_State *L, struct ui_paint *paint) {
+    if (!lua_istable(L, -1)) {
+        paint->stops = 1;
+        return read_color(L, paint->rgba[0]);
+    }
+    lua_getfield(L, -1, "gradient");
+    const char *dir = lua_tostring(L, -1);
+    lua_pop(L, 1);
+    if (!dir) {
+        paint->stops = 1;
+        return read_color(L, paint->rgba[0]);
+    }
+    paint->dir = dir[0] == 'h' ? 'h' : dir[0] == 'd' ? 'd' : dir[0] == 'r' ? 'r' : 'v';
+    paint->stops = 0;
+    int n = (int)lua_rawlen(L, -1);
+    bool ok = n >= 2 && n <= UI_MAX_STOPS;
+    for (int i = 1; ok && i <= n; i++) {
+        lua_rawgeti(L, -1, i);
+        ok = read_color(L, paint->rgba[paint->stops++]);
+        lua_pop(L, 1);
+    }
+    return ok;
+}
+
 static bool get_paint(struct build *b, int t, const char *key, struct ui_paint *paint) {
     lua_State *L = b->L;
     lua_getfield(L, t, key);
     bool present = !lua_isnil(L, -1) && lua_toboolean(L, -1);
-    bool ok = false;
-    if (present && lua_istable(L, -1)) {
-        lua_getfield(L, -1, "gradient");
-        const char *dir = lua_tostring(L, -1);
-        lua_pop(L, 1);
-        if (dir) {
-            paint->dir = dir[0] == 'h' ? 'h' : dir[0] == 'd' ? 'd' : 'v';
-            paint->stops = 0;
-            int n = (int)lua_rawlen(L, -1);
-            ok = n >= 2 && n <= UI_MAX_STOPS;
-            for (int i = 1; ok && i <= n; i++) {
-                lua_rawgeti(L, -1, i);
-                ok = read_color(L, paint->rgba[paint->stops++]);
-                lua_pop(L, 1);
-            }
-        } else {
-            ok = read_color(L, paint->rgba[0]);
-            paint->stops = 1;
-        }
-    } else if (present) {
-        ok = read_color(L, paint->rgba[0]);
-        paint->stops = 1;
-    }
+    bool ok = present && read_paint(L, paint);
     if (present && !ok) build_error(b, "bad colour or gradient for '%s'", key);
     lua_pop(L, 1);
     return ok;
@@ -178,7 +184,8 @@ static void read_style(struct build *b, int t, struct ui_style *style) {
     style->has_rotate = lua_isnumber(b->L, -1);
     style->rotate = style->has_rotate ? lua_tonumber(b->L, -1) : 0;
     lua_pop(b->L, 1);
-    /* shadow = {x, y, colour} or {x =, y =, color =}; false for none. */
+    /* shadow = {x, y, colour[, blur]} or {x =, y =, color =, blur =}; false
+     * for none. */
     lua_getfield(b->L, t, "shadow");
     style->has_shadow = false;
     if (lua_istable(b->L, -1)) {
@@ -195,9 +202,13 @@ static void read_style(struct build *b, int t, struct ui_style *style) {
         if (lua_isnil(b->L, -1)) { lua_pop(b->L, 1); lua_rawgeti(b->L, s, 3); }
         style->has_shadow = read_color(b->L, style->shadow_color);
         lua_pop(b->L, 1);
+        lua_getfield(b->L, s, "blur");
+        if (lua_isnil(b->L, -1)) { lua_pop(b->L, 1); lua_rawgeti(b->L, s, 4); }
+        style->shadow_blur = fmin(fmax(lua_tonumber(b->L, -1), 0), UI_MAX_BLUR);
+        lua_pop(b->L, 1);
         if (!style->has_shadow) build_error(b, "shadow needs a colour%s", NULL);
     } else if (lua_toboolean(b->L, -1)) {
-        build_error(b, "shadow must be {x, y, colour}%s", NULL);
+        build_error(b, "shadow must be {x, y, colour[, blur]}%s", NULL);
     } else if (lua_isboolean(b->L, -1)) {
         /* shadow = false: an explicit "none" that hover or exit can set. */
         style->has_shadow = true;
@@ -446,6 +457,191 @@ static void build_children(struct build *b, struct ui_node *parent, int t, int d
     }
 }
 
+/* ---- canvas shapes ---------------------------------------------------- */
+
+static bool path_push(double **out, size_t *count, size_t *cap, double v) {
+    if (*count == *cap) {
+        size_t next = *cap ? *cap * 2 : 32;
+        double *grown = next <= UI_MAX_PATH ? realloc(*out, next * sizeof(double)) : NULL;
+        if (!grown) return false;
+        *out = grown;
+        *cap = next;
+    }
+    (*out)[(*count)++] = v;
+    return true;
+}
+
+/* An SVG-style path, "M 0 8 L 4 0 C 6 0 8 2 8 4 Q 8 8 4 8 Z", with relative
+ * (lower-case) commands and H and V; stored as absolute M, L, C and Z. */
+static bool parse_path(const char *text, double **out, size_t *count) {
+    size_t cap = 0;
+    double cx = 0, cy = 0, sx = 0, sy = 0;
+    char cmd = 0;
+    const char *p = text;
+    *out = NULL;
+    *count = 0;
+    for (;;) {
+        while (*p == ' ' || *p == ',' || *p == '\n' || *p == '\t') p++;
+        if (!*p) return true;
+        if ((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z')) {
+            cmd = *p++;
+            if (cmd == 'Z' || cmd == 'z') {
+                if (!path_push(out, count, &cap, 'Z')) return false;
+                cx = sx;
+                cy = sy;
+                continue;
+            }
+        } else if (!cmd) {
+            return false;
+        }
+        bool rel = cmd >= 'a';
+        char up = rel ? (char)(cmd - 32) : cmd;
+        int need = up == 'M' || up == 'L' ? 2 : up == 'H' || up == 'V' ? 1 : up == 'C' ? 6
+            : up == 'Q' ? 4 : 0;
+        if (!need) return false;
+        double v[6];
+        for (int i = 0; i < need; i++) {
+            char *end;
+            v[i] = strtod(p, &end);
+            if (end == p) return false;
+            p = end;
+            while (*p == ' ' || *p == ',' || *p == '\n' || *p == '\t') p++;
+        }
+        if (up == 'H' || up == 'V') { /* a line along one axis */
+            double to = v[0];
+            v[0] = up == 'H' ? (rel ? cx + to : to) : cx;
+            v[1] = up == 'V' ? (rel ? cy + to : to) : cy;
+            up = 'L';
+            rel = false;
+        }
+        if (rel) for (int i = 0; i < need; i++) v[i] += i % 2 ? cy : cx;
+        bool ok = true;
+        if (up == 'M' || up == 'L') {
+            ok = path_push(out, count, &cap, up) && path_push(out, count, &cap, v[0]) &&
+                path_push(out, count, &cap, v[1]);
+            cx = v[0];
+            cy = v[1];
+            if (up == 'M') { sx = cx; sy = cy; cmd = rel ? 'l' : 'L'; }
+        } else {
+            double c[6];
+            if (up == 'Q') { /* a quadratic as the cubic that draws the same curve */
+                c[0] = cx + 2.0 / 3.0 * (v[0] - cx); c[1] = cy + 2.0 / 3.0 * (v[1] - cy);
+                c[2] = v[2] + 2.0 / 3.0 * (v[0] - v[2]); c[3] = v[3] + 2.0 / 3.0 * (v[1] - v[3]);
+                c[4] = v[2]; c[5] = v[3];
+            } else {
+                memcpy(c, v, sizeof(c));
+            }
+            ok = path_push(out, count, &cap, 'C');
+            for (int i = 0; ok && i < 6; i++) ok = path_push(out, count, &cap, c[i]);
+            cx = c[4];
+            cy = c[5];
+        }
+        if (!ok) return false;
+    }
+}
+
+/* `key` of the shape at `t`: a paint, or true for the node's colour. */
+static void shape_paint(struct build *b, int t, const char *key, struct ui_paint *paint,
+        bool *has, bool *current) {
+    lua_State *L = b->L;
+    lua_getfield(L, t, key);
+    if (lua_isboolean(L, -1)) {
+        *current = lua_toboolean(L, -1);
+    } else if (!lua_isnil(L, -1)) {
+        *has = read_paint(L, paint);
+        if (!*has) build_error(b, "bad colour or gradient for a shape's '%s'", key);
+    }
+    lua_pop(L, 1);
+}
+
+/* The array part of a canvas: {"line", x1, y1, x2, y2, stroke = ...} and so
+ * on. Lists of shapes are spliced in, like children. */
+static void build_shapes(struct build *b, struct ui_node *node, int t, int depth, size_t *cap) {
+    lua_State *L = b->L;
+    static const struct { const char *name; enum ui_shape shape; int args; } kinds[] = {
+        { "line", UI_SHAPE_LINE, 4 }, { "rect", UI_SHAPE_RECT, 4 },
+        { "circle", UI_SHAPE_CIRCLE, 3 }, { "arc", UI_SHAPE_ARC, 5 },
+        { "path", UI_SHAPE_PATH, 0 },
+    };
+    int n = (int)lua_rawlen(L, t);
+    for (int i = 1; i <= n && !b->failed; i++) {
+        lua_rawgeti(L, t, i);
+        int item = lua_gettop(L);
+        if (!lua_istable(L, item)) {
+            if (lua_toboolean(L, item)) build_error(b, "canvas shapes must be tables%s", NULL);
+            lua_pop(L, 1);
+            continue;
+        }
+        lua_rawgeti(L, item, 1);
+        const char *name = lua_type(L, -1) == LUA_TSTRING ? lua_tostring(L, -1) : NULL;
+        if (!name) {
+            /* A list of shapes. */
+            lua_pop(L, 1);
+            if (depth < 8) build_shapes(b, node, item, depth + 1, cap);
+            lua_pop(L, 1);
+            continue;
+        }
+        size_t k = 0;
+        while (k < sizeof(kinds) / sizeof(kinds[0]) && strcmp(kinds[k].name, name)) k++;
+        if (k == sizeof(kinds) / sizeof(kinds[0])) {
+            build_error(b, "unknown canvas shape '%s'", name);
+            lua_pop(L, 2);
+            break;
+        }
+        lua_pop(L, 1);
+        if (node->shape_count == *cap) {
+            size_t next = *cap ? *cap * 2 : 8;
+            struct ui_shape_op *grown = next <= UI_MAX_SHAPES
+                ? realloc(node->shapes, next * sizeof(*grown)) : NULL;
+            if (!grown) {
+                build_error(b, "too many canvas shapes%s", NULL);
+                lua_pop(L, 1);
+                break;
+            }
+            node->shapes = grown;
+            *cap = next;
+        }
+        struct ui_shape_op *op = &node->shapes[node->shape_count++];
+        memset(op, 0, sizeof(*op));
+        op->shape = kinds[k].shape;
+        for (int a = 0; a < kinds[k].args; a++) {
+            lua_rawgeti(L, item, a + 2);
+            if (!lua_isnumber(L, -1)) build_error(b, "canvas shape '%s' is missing a number", name);
+            op->v[a] = lua_tonumber(L, -1);
+            lua_pop(L, 1);
+        }
+        if (op->shape == UI_SHAPE_RECT) op->v[4] = get_number(L, item, "radius", 0);
+        if (op->shape == UI_SHAPE_PATH) {
+            lua_rawgeti(L, item, 2);
+            const char *text = lua_type(L, -1) == LUA_TSTRING ? lua_tostring(L, -1) : NULL;
+            if (!text || !parse_path(text, &op->path, &op->path_count))
+                build_error(b, "bad canvas path '%s'", text ? text : "(none)");
+            lua_pop(L, 1);
+        }
+        shape_paint(b, item, "fill", &op->fill, &op->has_fill, &op->fill_color);
+        shape_paint(b, item, "stroke", &op->stroke, &op->has_stroke, &op->stroke_color);
+        /* Neither: a line in the node's colour. */
+        if (!op->has_fill && !op->fill_color && !op->has_stroke) op->stroke_color = true;
+        op->line_width = get_number(L, item, "width", 1);
+        char cap_name[16];
+        const char *ends = field_string(L, item, "cap", cap_name, sizeof(cap_name));
+        op->round = ends && !strcmp(ends, "round");
+        op->opacity = get_number(L, item, "opacity", 1);
+        lua_getfield(L, item, "dash");
+        if (lua_istable(L, -1)) {
+            for (int a = 0; a < 2; a++) {
+                lua_rawgeti(L, -1, a + 1);
+                op->dash[a] = fmax(0, lua_tonumber(L, -1));
+                lua_pop(L, 1);
+            }
+            if (op->dash[1] <= 0) op->dash[1] = op->dash[0];
+        } else if (lua_isnumber(L, -1)) {
+            op->dash[0] = op->dash[1] = fmax(0, lua_tonumber(L, -1));
+        }
+        lua_pop(L, 2);
+    }
+}
+
 static struct ui_node *build_node(struct build *b, int t, int depth) {
     lua_State *L = b->L;
     if (depth >= UI_MAX_DEPTH) {
@@ -473,6 +669,7 @@ static struct ui_node *build_node(struct build *b, int t, int depth) {
     else if (!strcmp(kind, "pip")) node->kind = UI_NODE_PIP;
     else if (!strcmp(kind, "image")) node->kind = UI_NODE_IMAGE;
     else if (!strcmp(kind, "custom")) node->kind = UI_NODE_CUSTOM;
+    else if (!strcmp(kind, "canvas")) node->kind = UI_NODE_CANVAS;
     else {
         build_error(b, "unknown widget type '%s'", kind);
         free(node);
@@ -575,6 +772,22 @@ static struct ui_node *build_node(struct build *b, int t, int depth) {
         node->stroke = get_number(L, t, "stroke", 2);
         break;
     }
+    case UI_NODE_CANVAS: {
+        size_t cap = 0;
+        build_shapes(b, node, t, 0, &cap);
+        lua_getfield(L, t, "view");
+        if (lua_istable(L, -1)) {
+            for (int i = 0; i < 2; i++) {
+                lua_rawgeti(L, -1, i + 1);
+                node->view[i] = lua_tonumber(L, -1);
+                lua_pop(L, 1);
+            }
+            if (node->view[0] <= 0 || node->view[1] <= 0)
+                build_error(b, "a canvas's view must be {width, height}%s", NULL);
+        }
+        lua_pop(L, 1);
+        break;
+    }
     case UI_NODE_CUSTOM:
         node->widget = get_string(L, t, "widget");
         if (!node->widget) build_error(b, "plugin widget without a type%s", NULL);
@@ -612,6 +825,8 @@ void ui_free(lua_State *L, struct ui_node *node) {
         luaL_unref(L, LUA_REGISTRYINDEX, node->on_drag);
     }
     free(node->icon);
+    for (size_t i = 0; i < node->shape_count; i++) free(node->shapes[i].path);
+    free(node->shapes);
     if (node->layout) g_object_unref(node->layout);
     if (node->image) cairo_surface_destroy(node->image);
     free(node->text);
@@ -712,6 +927,7 @@ void ui_measure(cairo_t *cr, struct ui_node *node, const struct ui_defaults *def
     case UI_NODE_PIP:
         w = h = node->pip_radius * 2;
         break;
+    case UI_NODE_CANVAS:
     case UI_NODE_CUSTOM:
     case UI_NODE_ICON:
         break; /* sized by width/height or by its parent */
@@ -921,6 +1137,22 @@ void ui_arrange(cairo_t *cr, struct ui_node *node, const struct ui_defaults *def
 
 /* ---- drawing ---------------------------------------------------------- */
 
+/* A gradient across the box: linear, or radial from its centre to its
+ * edges (an ellipse in a box that is not square). */
+static cairo_pattern_t *gradient_pattern(char dir, double x, double y, double w, double h) {
+    if (dir == 'r') {
+        cairo_pattern_t *pattern = cairo_pattern_create_radial(0, 0, 0, 0, 0, 1);
+        cairo_matrix_t m;
+        cairo_matrix_init_scale(&m, 2.0 / fmax(w, 1e-6), 2.0 / fmax(h, 1e-6));
+        cairo_matrix_translate(&m, -(x + w / 2), -(y + h / 2));
+        cairo_pattern_set_matrix(pattern, &m);
+        return pattern;
+    }
+    return dir == 'h' ? cairo_pattern_create_linear(x, 0, x + w, 0)
+        : dir == 'd' ? cairo_pattern_create_linear(x, y, x + w, y + h)
+        : cairo_pattern_create_linear(0, y, 0, y + h);
+}
+
 static void set_paint(cairo_t *cr, const struct ui_paint *paint, double x, double y,
         double w, double h) {
     if (paint->stops == 1) {
@@ -928,9 +1160,7 @@ static void set_paint(cairo_t *cr, const struct ui_paint *paint, double x, doubl
             paint->rgba[0][3]);
         return;
     }
-    cairo_pattern_t *pattern = paint->dir == 'h' ? cairo_pattern_create_linear(x, 0, x + w, 0)
-        : paint->dir == 'd' ? cairo_pattern_create_linear(x, y, x + w, y + h)
-        : cairo_pattern_create_linear(0, y, 0, y + h);
+    cairo_pattern_t *pattern = gradient_pattern(paint->dir, x, y, w, h);
     for (int i = 0; i < paint->stops; i++) {
         const double *c = paint->rgba[i];
         cairo_pattern_add_color_stop_rgba(pattern, (double)i / (paint->stops - 1),
@@ -1175,6 +1405,7 @@ void ui_merge_style(struct ui_style *out, const struct ui_style *over) {
     if (over->has_shadow) {
         memcpy(out->shadow, over->shadow, sizeof(out->shadow));
         memcpy(out->shadow_color, over->shadow_color, sizeof(out->shadow_color));
+        out->shadow_blur = over->shadow_blur;
         out->has_shadow = true;
     }
 }
@@ -1199,6 +1430,7 @@ static void style_from_anim(const struct ui_anim *anim, struct ui_style *s) {
     s->has_rotate = true;
     s->shadow[0] = v[UI_CH_SHADOW_X];
     s->shadow[1] = v[UI_CH_SHADOW_Y];
+    s->shadow_blur = fmax(0, v[UI_CH_SHADOW_BLUR]);
     memcpy(s->shadow_color, &v[UI_CH_SHADOW], sizeof(s->shadow_color));
     s->has_shadow = s->shadow_color[3] > 0.002;
     memcpy(s->border, &v[UI_CH_BORDER], sizeof(s->border));
@@ -1229,9 +1461,7 @@ static void set_paint_anim(cairo_t *cr, const struct ui_paint *paint, const doub
         set_paint(cr, paint, x, y, w, h);
         return;
     }
-    cairo_pattern_t *pattern = paint->dir == 'h' ? cairo_pattern_create_linear(x, 0, x + w, 0)
-        : paint->dir == 'd' ? cairo_pattern_create_linear(x, y, x + w, y + h)
-        : cairo_pattern_create_linear(0, y, 0, y + h);
+    cairo_pattern_t *pattern = gradient_pattern(paint->dir, x, y, w, h);
     for (int i = 0; i < UI_ANIM_STOPS; i++) {
         const double *c = &stops[4 * i];
         cairo_pattern_add_color_stop_rgba(pattern, (double)i / (UI_ANIM_STOPS - 1),
@@ -1257,6 +1487,208 @@ static void device_box(cairo_t *cr, double x, double y, double w, double h, doub
     }
     out[0] = floor(x1); out[1] = floor(y1);
     out[2] = ceil(x2) - out[0]; out[3] = ceil(y2) - out[1];
+}
+
+/* ---- soft shadows ----------------------------------------------------- */
+
+/* How far a shadow reaches past its node: the offset, and a blur's falloff
+ * (three box passes spread it to one and a half times the radius). */
+static double shadow_reach(const struct ui_style *s) {
+    return fabs(s->shadow[0]) + fabs(s->shadow[1]) + ceil(s->shadow_blur * 1.5) + 2;
+}
+
+static void box_blur(unsigned char *data, unsigned char *tmp, int w, int h, int stride, int r) {
+    int span = 2 * r + 1;
+    for (int pass = 0; pass < 2; pass++) { /* rows, then columns */
+        int lines = pass ? w : h, len = pass ? h : w, step = pass ? stride : 1;
+        for (int l = 0; l < lines; l++) {
+            unsigned char *line = pass ? data + l : data + l * stride;
+            int sum = 0;
+            for (int i = -r; i <= r; i++) sum += i >= 0 && i < len ? line[i * step] : 0;
+            for (int i = 0; i < len; i++) {
+                tmp[i] = (unsigned char)(sum / span);
+                int out = i - r, in = i + r + 1;
+                if (out >= 0) sum -= line[out * step];
+                if (in < len) sum += line[in * step];
+            }
+            for (int i = 0; i < len; i++) line[i * step] = tmp[i];
+        }
+    }
+}
+
+/* A blurred rounded square just large enough to hold its corners: the
+ * shadow of any rectangle with that corner radius and blur is its corners
+ * with its edges and middle stretched (a nine-patch). Tiles are in device
+ * pixels: `margin` of falloff outside the shape, corners `corner` square. */
+struct shadow_tile {
+    int radius, box; /* corner radius and blur box radius, device px */
+    int margin, corner;
+    cairo_surface_t *mask;
+};
+
+static const struct shadow_tile *shadow_tile(int radius, int box) {
+    static struct shadow_tile tiles[12];
+    static size_t next;
+    for (size_t i = 0; i < 12; i++)
+        if (tiles[i].mask && tiles[i].radius == radius && tiles[i].box == box) return &tiles[i];
+    struct shadow_tile *tile = &tiles[next++ % 12];
+    if (tile->mask) cairo_surface_destroy(tile->mask);
+    tile->mask = NULL;
+    int margin = 3 * box, inside = (radius > margin ? radius : margin) + 1;
+    int corner = margin + inside, size = 2 * corner + 1;
+    cairo_surface_t *mask = cairo_image_surface_create(CAIRO_FORMAT_A8, size, size);
+    if (cairo_surface_status(mask) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(mask);
+        return NULL;
+    }
+    cairo_t *cr = cairo_create(mask);
+    rounded_rect(cr, margin, margin, size - 2 * margin, size - 2 * margin, radius);
+    cairo_set_source_rgba(cr, 0, 0, 0, 1);
+    cairo_fill(cr);
+    cairo_destroy(cr);
+    cairo_surface_flush(mask);
+    unsigned char *tmp = malloc((size_t)size);
+    if (tmp) {
+        unsigned char *data = cairo_image_surface_get_data(mask);
+        int stride = cairo_image_surface_get_stride(mask);
+        for (int i = 0; i < 3; i++) box_blur(data, tmp, size, size, stride, box);
+        free(tmp);
+    }
+    cairo_surface_mark_dirty(mask);
+    tile->mask = mask;
+    tile->radius = radius;
+    tile->box = box;
+    tile->margin = margin;
+    tile->corner = corner;
+    return tile;
+}
+
+/* Paints the current source through the blurred shape of a rounded
+ * rectangle. Under a plain scale the patches are placed on whole device
+ * pixels, so they meet without seams; a rotated node is drawn unsnapped. */
+static void draw_soft_shadow(cairo_t *cr, double x, double y, double w, double h,
+        double radius, double blur) {
+    if (w <= 0 || h <= 0) return;
+    cairo_matrix_t m;
+    cairo_get_matrix(cr, &m);
+    bool plain = m.xy == 0 && m.yx == 0 && m.xx > 0 && m.yy > 0;
+    double unit = plain ? m.xx : 1.0; /* device px per unit the tile is made for */
+    radius = fmin(radius, fmin(w, h) / 2);
+    const struct shadow_tile *tile = shadow_tile((int)lround(radius * unit),
+        (int)fmax(1, lround(blur * unit / 2)));
+    if (!tile) return;
+    cairo_save(cr);
+    if (plain) {
+        double x2 = x + w, y2 = y + h;
+        cairo_user_to_device(cr, &x, &y);
+        cairo_user_to_device(cr, &x2, &y2);
+        x = round(x); y = round(y);
+        w = fmax(1, round(x2) - x); h = fmax(1, round(y2) - y);
+        cairo_identity_matrix(cr);
+    }
+    double margin = tile->margin, corner = tile->corner;
+    double ox = x - margin, oy = y - margin, ow = w + 2 * margin, oh = h + 2 * margin;
+    /* A box smaller than two corners squeezes them. */
+    double cw = floor(fmin(corner, ow / 2)), ch = floor(fmin(corner, oh / 2));
+    double dst_x[4] = { ox, ox + cw, ox + ow - cw, ox + ow };
+    double dst_y[4] = { oy, oy + ch, oy + oh - ch, oy + oh };
+    double src[4] = { 0, corner, corner + 1, 2 * corner + 1 };
+    cairo_pattern_t *pattern = cairo_pattern_create_for_surface(tile->mask);
+    for (int row = 0; row < 3; row++) {
+        for (int col = 0; col < 3; col++) {
+            double dw = dst_x[col + 1] - dst_x[col], dh = dst_y[row + 1] - dst_y[row];
+            if (dw <= 0 || dh <= 0) continue;
+            double sw = src[col + 1] - src[col], sh = src[row + 1] - src[row];
+            cairo_matrix_t to_tile;
+            cairo_matrix_init_translate(&to_tile, src[col], src[row]);
+            cairo_matrix_scale(&to_tile, sw / dw, sh / dh);
+            cairo_matrix_translate(&to_tile, -dst_x[col], -dst_y[row]);
+            cairo_pattern_set_matrix(pattern, &to_tile);
+            /* Stretched patches repeat one row or column of the tile. */
+            cairo_pattern_set_filter(pattern, col == 1 || row == 1 ? CAIRO_FILTER_NEAREST
+                : CAIRO_FILTER_BILINEAR);
+            cairo_save(cr);
+            cairo_rectangle(cr, dst_x[col], dst_y[row], dw, dh);
+            cairo_clip(cr);
+            cairo_mask(cr, pattern);
+            cairo_restore(cr);
+        }
+    }
+    cairo_pattern_destroy(pattern);
+    cairo_restore(cr);
+}
+
+/* ---- canvas shapes ---------------------------------------------------- */
+
+static void shape_source(cairo_t *cr, const struct ui_paint *paint, bool own,
+        const double color[4], double opacity, bool stroke) {
+    if (!own) {
+        cairo_set_source_rgba(cr, color[0], color[1], color[2], color[3] * opacity);
+        return;
+    }
+    struct ui_paint faded = *paint;
+    for (int i = 0; i < faded.stops; i++) faded.rgba[i][3] *= opacity;
+    double x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+    if (faded.stops > 1) {
+        if (stroke) cairo_stroke_extents(cr, &x1, &y1, &x2, &y2);
+        else cairo_path_extents(cr, &x1, &y1, &x2, &y2);
+    }
+    set_paint(cr, &faded, x1, y1, x2 - x1, y2 - y1);
+}
+
+/* Shapes in the canvas's own coordinates, in order; gradients span each
+ * shape's own extents. Angles are degrees clockwise from 12 o'clock. */
+static void draw_shapes(cairo_t *cr, const struct ui_node *node, const double color[4]) {
+    for (size_t i = 0; i < node->shape_count; i++) {
+        const struct ui_shape_op *op = &node->shapes[i];
+        const double *v = op->v;
+        cairo_new_path(cr);
+        switch (op->shape) {
+        case UI_SHAPE_LINE:
+            cairo_move_to(cr, v[0], v[1]);
+            cairo_line_to(cr, v[2], v[3]);
+            break;
+        case UI_SHAPE_RECT:
+            if (v[4] > 0) rounded_rect(cr, v[0], v[1], v[2], v[3], v[4]);
+            else cairo_rectangle(cr, v[0], v[1], v[2], v[3]);
+            break;
+        case UI_SHAPE_CIRCLE:
+            cairo_arc(cr, v[0], v[1], fmax(0, v[2]), 0, 2 * G_PI);
+            cairo_close_path(cr);
+            break;
+        case UI_SHAPE_ARC: {
+            double from = (v[3] - 90) * G_PI / 180.0, to = (v[4] - 90) * G_PI / 180.0;
+            if (to >= from) cairo_arc(cr, v[0], v[1], fmax(0, v[2]), from, to);
+            else cairo_arc_negative(cr, v[0], v[1], fmax(0, v[2]), from, to);
+            break;
+        }
+        case UI_SHAPE_PATH:
+            for (size_t p = 0; p < op->path_count;) {
+                int cmd = (int)op->path[p++];
+                const double *a = &op->path[p];
+                if (cmd == 'M') { cairo_move_to(cr, a[0], a[1]); p += 2; }
+                else if (cmd == 'L') { cairo_line_to(cr, a[0], a[1]); p += 2; }
+                else if (cmd == 'C') { cairo_curve_to(cr, a[0], a[1], a[2], a[3], a[4], a[5]); p += 6; }
+                else cairo_close_path(cr);
+            }
+            break;
+        }
+        if (op->has_fill || op->fill_color) {
+            shape_source(cr, &op->fill, op->has_fill, color, op->opacity, false);
+            cairo_fill_preserve(cr);
+        }
+        if ((op->has_stroke || op->stroke_color) && op->line_width > 0) {
+            cairo_set_line_width(cr, op->line_width);
+            cairo_set_line_cap(cr, op->round ? CAIRO_LINE_CAP_ROUND : CAIRO_LINE_CAP_BUTT);
+            cairo_set_line_join(cr, op->round ? CAIRO_LINE_JOIN_ROUND : CAIRO_LINE_JOIN_MITER);
+            if (op->dash[0] > 0) cairo_set_dash(cr, op->dash, 2, 0);
+            else cairo_set_dash(cr, NULL, 0, 0);
+            shape_source(cr, &op->stroke, op->has_stroke, color, op->opacity, true);
+            cairo_stroke_preserve(cr);
+        }
+    }
+    cairo_new_path(cr);
+    cairo_set_dash(cr, NULL, 0, 0);
 }
 
 void ui_draw(cairo_t *cr, const struct ui_node *node, const struct ui_node *hovered,
@@ -1294,8 +1726,7 @@ void ui_draw(cairo_t *cr, const struct ui_node *node, const struct ui_node *hove
             cairo_translate(cr, -(x + w / 2), -(y + h / 2));
         }
     }
-    double pad = 6 + node->border_width +
-        (s.has_shadow ? fabs(s.shadow[0]) + fabs(s.shadow[1]) : 0);
+    double pad = 6 + node->border_width + (s.has_shadow ? shadow_reach(&s) : 0);
     if (anim) {
         struct ui_anim *state = (struct ui_anim *)anim;
         device_box(cr, x, y, w, h, pad, state->drawn);
@@ -1317,17 +1748,22 @@ void ui_draw(cairo_t *cr, const struct ui_node *node, const struct ui_node *hove
          * for a shadow and children that stick out a little), or every
          * fading widget clears a buffer the size of the surface. */
         cairo_save(cr);
-        double room = 24 + (s.has_shadow ? fabs(s.shadow[0]) + fabs(s.shadow[1]) : 0);
+        double room = 24 + (s.has_shadow ? shadow_reach(&s) : 0);
         cairo_rectangle(cr, x - room, y - room, w + 2 * room, h + 2 * room);
         cairo_clip(cr);
         cairo_push_group(cr);
     }
 
     if (s.has_shadow && s.shadow_color[3] > 0) {
-        rounded_rect(cr, x + s.shadow[0], y + s.shadow[1], w, h, node->radius);
         cairo_set_source_rgba(cr, s.shadow_color[0], s.shadow_color[1], s.shadow_color[2],
             s.shadow_color[3]);
-        cairo_fill(cr);
+        if (s.shadow_blur >= 0.5) {
+            draw_soft_shadow(cr, x + s.shadow[0], y + s.shadow[1], w, h, node->radius,
+                s.shadow_blur);
+        } else {
+            rounded_rect(cr, x + s.shadow[0], y + s.shadow[1], w, h, node->radius);
+            cairo_fill(cr);
+        }
     }
 
     if (s.has_background && s.background.stops > 0) {
@@ -1373,6 +1809,19 @@ void ui_draw(cairo_t *cr, const struct ui_node *node, const struct ui_node *hove
             cairo_scale(cr, w / 24.0, h / 24.0);
             cairo_set_source_rgba(cr, color[0], color[1], color[2], color[3]);
             draw_icon(cr, node->icon, node->stroke);
+            cairo_restore(cr);
+        }
+        break;
+    case UI_NODE_CANVAS:
+        if (w > 0 && h > 0) {
+            double vw = node->view[0] > 0 ? node->view[0] : w;
+            double vh = node->view[1] > 0 ? node->view[1] : h;
+            cairo_save(cr);
+            cairo_translate(cr, x, y);
+            cairo_rectangle(cr, 0, 0, w, h);
+            cairo_clip(cr);
+            cairo_scale(cr, w / vw, h / vh);
+            draw_shapes(cr, node, color);
             cairo_restore(cr);
         }
         break;
@@ -1464,9 +1913,17 @@ static uint64_t hash_string(uint64_t h, const char *s) {
 
 #define HASH(h, field) hash_bytes((h), &(field), sizeof(field))
 
+/* Only the stops in use: the rest of a paint read into reused memory is
+ * whatever was there. */
+static uint64_t hash_paint(uint64_t h, const struct ui_paint *paint) {
+    h = HASH(h, paint->stops);
+    if (paint->stops > 1) h = HASH(h, paint->dir);
+    return hash_bytes(h, paint->rgba, (size_t)paint->stops * sizeof(paint->rgba[0]));
+}
+
 static uint64_t hash_style(uint64_t h, const struct ui_style *s) {
     h = HASH(h, s->has_background);
-    if (s->has_background) h = hash_bytes(h, &s->background, sizeof(s->background));
+    if (s->has_background) h = hash_paint(h, &s->background);
     h = HASH(h, s->has_border);
     if (s->has_border) h = HASH(h, s->border);
     h = HASH(h, s->has_color);
@@ -1483,6 +1940,7 @@ static uint64_t hash_style(uint64_t h, const struct ui_style *s) {
     if (s->has_shadow) {
         h = HASH(h, s->shadow);
         h = HASH(h, s->shadow_color);
+        h = HASH(h, s->shadow_blur);
     }
     return h;
 }
@@ -1524,6 +1982,20 @@ static uint64_t node_hash(const struct ui_node *n, uint64_t h, bool *dynamic, bo
     h = HASH(h, n->image);
     h = hash_string(h, n->icon);
     h = HASH(h, n->stroke);
+    h = HASH(h, n->shape_count);
+    h = HASH(h, n->view);
+    for (size_t i = 0; i < n->shape_count; i++) {
+        const struct ui_shape_op *op = &n->shapes[i];
+        h = HASH(h, op->shape); h = HASH(h, op->v);
+        h = HASH(h, op->has_fill); h = HASH(h, op->has_stroke);
+        if (op->has_fill) h = hash_paint(h, &op->fill);
+        if (op->has_stroke) h = hash_paint(h, &op->stroke);
+        h = HASH(h, op->fill_color); h = HASH(h, op->stroke_color);
+        h = HASH(h, op->line_width); h = HASH(h, op->round);
+        h = HASH(h, op->dash); h = HASH(h, op->opacity);
+        h = HASH(h, op->path_count);
+        if (op->path_count) h = hash_bytes(h, op->path, op->path_count * sizeof(double));
+    }
     if (n->widget) *dynamic = true;
     /* Whether it reacts, not to what: the input region depends on it. */
     bool reacts[3] = { n->on_click != LUA_NOREF, n->on_scroll != LUA_NOREF, n->on_drag != LUA_NOREF };
@@ -1541,8 +2013,7 @@ static uint64_t node_hash(const struct ui_node *n, uint64_t h, bool *dynamic, bo
 /* (ox, oy): what the ancestors' translates move the node by, as ui_draw
  * composes them. */
 static void diff_grow(double rect[4], bool *any, const struct ui_node *n, double ox, double oy) {
-    double pad = 6 + n->border_width +
-        (n->style.has_shadow ? fabs(n->style.shadow[0]) + fabs(n->style.shadow[1]) : 0);
+    double pad = 6 + n->border_width + (n->style.has_shadow ? shadow_reach(&n->style) : 0);
     double x = ox + n->x - pad, y = oy + n->y - pad, w = n->w + 2 * pad, h = n->h + 2 * pad;
     if (n->style.has_translate) { x += n->style.translate[0]; y += n->style.translate[1]; }
     if (!*any) {

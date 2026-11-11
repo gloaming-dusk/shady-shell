@@ -24,7 +24,7 @@ enum {
     UI_CH_SCALE,
     UI_CH_TX, UI_CH_TY,
     UI_CH_ROTATE,
-    UI_CH_SHADOW_X, UI_CH_SHADOW_Y,
+    UI_CH_SHADOW_X, UI_CH_SHADOW_Y, UI_CH_SHADOW_BLUR,
     UI_CH_SHADOW, /* rgba */
     UI_CH_BORDER = UI_CH_SHADOW + 4, /* rgba */
     UI_CH_COLOR = UI_CH_BORDER + 4,

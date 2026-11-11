@@ -1914,6 +1914,7 @@ static const char *prelude =
     "shell.stack = widget('box', { direction = 'stack' })\n"
     "shell.pip = widget('pip', {})\n"
     "shell.image = widget('image', {})\n"
+    "shell.canvas = widget('canvas', {})\n"
     "function shell.spacer(props)\n"
     "  props = props or {}\n"
     "  props.type = 'box'\n"
