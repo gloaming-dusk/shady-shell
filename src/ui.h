@@ -152,6 +152,7 @@ struct ui_node {
     bool lit;
 
     cairo_surface_t *image;
+    int fit; /* enum ui_fit */
 
     char *icon; /* UI_NODE_ICON: a built-in icon name */
     double stroke; /* icon line width */
@@ -251,6 +252,15 @@ const struct ui_prop *ui_find_prop(const struct shady_shell_props_handle *props,
 
 /* Colour parsing shared with the Lua API: "#RGB", "#RRGGBB", "#RRGGBBAA". */
 bool ui_parse_hex(const char *text, double rgba[4]);
+
+/* How an image fills its box: stretched to it (the default), covering it
+ * and cut to it, inside it whole, at its own size in the middle, or
+ * repeated from the top left corner. */
+enum ui_fit { UI_FIT_FILL, UI_FIT_COVER, UI_FIT_CONTAIN, UI_FIT_CENTER, UI_FIT_TILE };
+
+/* A picture file, decoded once and kept while it is unchanged on disk (a
+ * new reference), or NULL with the reason in `error`. */
+cairo_surface_t *ui_image(const char *path, char *error, size_t error_size);
 void ui_format_hex(const double rgba[4], char out[10]);
 
 #endif

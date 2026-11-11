@@ -31,5 +31,21 @@
   `Sans`-set pills, the brand tile and the "Shady" wordmark are gone, and
   popups keep a transparent margin for their shadows, so their surfaces are
   larger than their cards.
+- A wallpaper manager, `require("wallpaper")`: a rice installs its own
+  wallpaper (a shader, a view, a plugin's widget, a picture, a folder or a
+  colour) as the default, and a picture saved as
+  `~/.config/shady/wallpaper.jpg`, a folder `~/.config/shady/wallpapers`,
+  or a choice made with the new `shady-wallpaper` command replaces it,
+  per output if wanted. Changes show at once, with a cross-fade; choices
+  last across sessions. The default UI uses it, with no wallpaper of its
+  own.
+- `shell.image` reads JPEG and WebP besides PNG (libjpeg and libwebp,
+  optional at build time), reduces pictures over 8192 pixels, reads a file
+  again when it changes on disk, and takes `fit` (`fill`, `cover`,
+  `contain`, `center`, `tile`). A picture drawn at another size is scaled
+  once, not on every repaint.
+- `shell.files`, `shell.stat`, `shell.watch`, `shell.image_size` and
+  `shell.image_formats`, for configs that look at files; `shell.renderer`
+  (`"gl"` or `"shm"`).
 
 Earlier changes are in Shady's changelog, up to its 0.2.0.

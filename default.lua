@@ -17,6 +17,7 @@
 --   hour           a fixed hour (0..24) for the light, e.g. 6.5 for dawn
 --   bar_opacity, panel_opacity, bar_shader, bar_uniforms, focus_shader,
 --   focus_uniforms, bar_extra
+--   wallpaper      a picture, a folder of them or "#rrggbb" (see wallpaper.lua)
 local options = shell.options or {}
 local t = shell.theme
 local WHITE, BLACK = "#ffffff", "#000000"
@@ -24,6 +25,12 @@ local BAR = 38
 local a, mix = shell.alpha, shell.mix
 
 shell.fonts(shell.data_dir .. "/fonts")
+
+-- Meridian has no wallpaper of its own: the compositor's background is the
+-- night the day line crosses. A picture saved as ~/.config/shady/wallpaper.jpg
+-- (or .png, .webp; a folder ~/.config/shady/wallpapers is a slideshow) or
+-- chosen with `shady-wallpaper set` goes under the bar instead.
+require("wallpaper").install { source = options.wallpaper }
 local function sans(weight, size) return "Manrope " .. weight .. " " .. size end
 local function serif(size, italic) return "Instrument Serif " .. (italic and "Italic " or "") .. size end
 

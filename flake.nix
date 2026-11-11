@@ -47,7 +47,9 @@
           inputsFrom = [ (shellFor pkgs) ];
           # The compositor the headless tests (tests/run.sh) run the shell in.
           packages = [ shady.packages.${pkgs.stdenv.hostPlatform.system}.default ]
-            ++ (with pkgs; [ gdb grim wl-clipboard wtype foot ]);
+            ++ (with pkgs; [ gdb grim wl-clipboard wtype foot ])
+            # tests/headless-shell-wallpaper.sh makes its JPEG and WebP pictures.
+            ++ [ pkgs.libjpeg.bin pkgs.libwebp ];
         };
       });
     };

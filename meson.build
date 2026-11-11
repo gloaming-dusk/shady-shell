@@ -31,6 +31,9 @@ glesv2 = dependency('glesv2', required: false)
 wayland_egl = dependency('wayland-egl', required: false)
 gl_found = egl.found() and glesv2.found() and wayland_egl.found()
 gl_deps = gl_found ? [egl, glesv2, wayland_egl] : []
+# Pictures besides PNG for shell.image (wallpapers): JPEG and WebP.
+libjpeg = dependency('libjpeg', required: get_option('jpeg'))
+libwebp = dependency('libwebp', required: get_option('webp'))
 
 wayland_protocols_dir = wayland_protocols.get_variable(pkgconfig: 'pkgdatadir')
 wlr_protocols_dir = wlr_protocols.get_variable(pkgconfig: 'pkgdatadir')
@@ -76,6 +79,7 @@ executable('shady-shell',
     'src/theme.c',
     'src/apps.c',
     'src/ui.c',
+    'src/image.c',
     'src/anim.c',
     'src/notify.c',
     'src/script.c',
@@ -89,13 +93,16 @@ executable('shady-shell',
     '-D_POSIX_C_SOURCE=200809L',
     '-DSHELL_HAS_GL=@0@'.format(gl_found ? 1 : 0),
     '-DHAVE_SD_BUS=@0@'.format(sd_bus.found() ? 1 : 0),
+    '-DHAVE_JPEG=@0@'.format(libjpeg.found() ? 1 : 0),
+    '-DHAVE_WEBP=@0@'.format(libwebp.found() ? 1 : 0),
     '-DSHADY_SHELL_DATA_DIR="@0@"'.format(shell_data_dir),
     '-DSHADY_SHELL_PLUGIN_INSTALL_DIR="@0@"'.format(join_paths(get_option('prefix'), shell_plugin_install_dir)),
   # An installed shell must not load code from where it happened to be built.
   ] + (get_option('installed_data') ? [] : [
     '-DSHADY_SHELL_PLUGIN_DIR="@0@"'.format(meson.current_build_dir()),
   ]),
-  dependencies: [wayland_client, cairo, pangocairo, pangoft2, fontconfig, xkbcommon, sd_bus, lua, dl, m] + gl_deps,
+  dependencies: [wayland_client, cairo, pangocairo, pangoft2, fontconfig, xkbcommon, sd_bus,
+    libjpeg, libwebp, lua, dl, m] + gl_deps,
   install: true)
 
 # Checks passwords for the lock screen (shell.authenticate) with PAM, out of
@@ -162,12 +169,13 @@ executable('ime-probe',
   install: false)
 
 # The Lua UI and its data; the C sources stay behind.
-install_data('default.lua', 'shortcut_overlay.lua', install_dir: shell_data_install_dir)
+install_data('default.lua', 'shortcut_overlay.lua', 'wallpaper.lua', install_dir: shell_data_install_dir)
 foreach dir : ['examples', 'fonts', 'shaders']
   install_subdir(dir, install_dir: shell_data_install_dir)
 endforeach
 install_data('bin/shady-brightness', install_dir: join_paths(shell_data_install_dir, 'bin'),
   install_mode: 'rwxr-xr-x')
+install_data('bin/shady-wallpaper', install_dir: get_option('bindir'), install_mode: 'rwxr-xr-x')
 
 # For shell plugins built elsewhere (the greeter's greetd plugin, rices'):
 # the plugin ABI header, the protocol, and where plugins are installed.

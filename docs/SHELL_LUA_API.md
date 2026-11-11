@@ -157,7 +157,7 @@ Widgets are tables; these constructors fill in `type`:
 | `shell.icon(name, {size=, stroke=, color=})` | A built-in line icon: `wifi`, `volume`, `mute`, `bluetooth`, `moon`, `sun`, `capture`, `play`, `pause`, `next`, `previous`, `battery`, `search`, `power`, `grid`, `plus`, `close`, `sliders`, `lock`, `music`, `check`, `bell`. `size` defaults to 16, `stroke` to 2 (in a 24-unit box). |
 | `shell.text(text, {...})` | A line of text. |
 | `shell.pip{radius=, lit=}` | The focus dot: a glowing dot when lit, a faint ring otherwise. |
-| `shell.image{path=, width=, height=}` | A PNG. |
+| `shell.image{path=, width=, height=, fit=}` | A picture: PNG, and JPEG and WebP when the shell is built with libjpeg and libwebp (`shell.image_formats` lists them). `fit` is `"fill"` (stretched to the box, the default), `"cover"`, `"contain"`, `"center"` or `"tile"`. A file replaced on disk is read again. |
 | `shell.canvas{...}` | Vector shapes drawn in the widget's own coordinates: lines, rectangles, circles, arcs and paths (see Canvas). |
 | `shell.spacer{...}` | An empty box that grows (or has a fixed `width`/`height`). |
 
@@ -389,6 +389,12 @@ Window arguments may also be the window tables themselves.
 | `shell.notify(summary[, body[, app]])` | show a notification of the shell's own, like one a client sent |
 | `shell.fonts(dir)` | make the font files in `dir` (relative to the config file, or absolute) available by family name; call it before the views use them. The data directory's `fonts` holds Manrope and Instrument Serif, which the default UI is set in: `shell.fonts(shell.data_dir .. "/fonts")` |
 | `shell.data_dir`, `shell.config_path` | where the default UI and your config live |
+| `shell.files(dir)` | the directory's entries sorted by name, hidden ones left out: `{name, path, dir, mtime, size}` each; `nil, message` when it cannot be read |
+| `shell.stat(path)` | `{dir, mtime, size}` of a file or directory (following links), or nil |
+| `shell.watch(path, fn)` | call `fn` once changes settle, whenever a file in the directory `path` (or the file `path`, which may not exist yet) is written, added, removed or renamed; returns an id for `shell.unwatch(id)`, or `nil, message` |
+| `shell.image_size(path)` | a picture's width and height, or `nil, message`; it decodes the file (for `shell.image` to reuse) |
+| `shell.image_formats` | the picture formats this shell reads, `{"png", "jpeg", "webp"}` |
+| `shell.renderer` | `"gl"`, or `"shm"`, which draws no shader effects |
 
 `shell.poll` and `shell.listen` start their command the first time a view
 asks for it and keep it running for as long as the config is loaded. Any
@@ -430,6 +436,83 @@ shell.on("notifications", function()
         if any then shell.open("toasts") else shell.close("toasts") end
     end
 end)
+```
+
+## Wallpaper
+
+The data directory's [`wallpaper.lua`](../wallpaper.lua) gives a config a
+wallpaper that people can change without editing it. A rice says what its
+own wallpaper is; dropping a picture in `~/.config/shady`, or choosing one
+with `shady-wallpaper`, replaces it:
+
+```lua
+local wallpaper = require("wallpaper")
+wallpaper.install {
+    default = { shader = shell.shader("shaders/sea.frag"), uniforms = { accent = P.accent } },
+}
+```
+
+Each output shows the first of these that can be drawn:
+
+1. a choice made while running: `wallpaper.set(source[, output])`, or
+   `shady-wallpaper set PATH [OUTPUT]`; kept in
+   `$XDG_STATE_HOME/shady/wallpaper`, so it lasts across sessions
+2. the config's `outputs[output]`, then its `source`
+3. a picture in `$XDG_CONFIG_HOME/shady`: `wallpaper-<output>.<ext>`, then
+   `wallpaper.<ext>` (`png`, `jpg`, `webp`), then the folder `wallpapers/`
+4. the rice's `default`
+5. `color`, or nothing, and the compositor's background shows
+
+A source that cannot be drawn, such as a missing file or a folder without
+pictures, is logged once and skipped. Files are watched: a picture saved,
+replaced or removed shows at once, with a cross-fade.
+
+A source is any of:
+
+| Source | |
+|---|---|
+| `"~/Pictures/sea.jpg"` | a picture; relative paths are relative to the config |
+| `"~/Pictures/walls"` | a folder: a slideshow, a picture every `interval` seconds |
+| `"#1E1E2E"`, `shell.gradient(...)` | a colour |
+| `{ path = ..., fit = "contain" }`, `{ dir = ..., interval = 60, order = "random" }` | the same with their own options |
+| `shell.shader(...)`, `{ shader = ..., uniforms = {...} or function(ctx), color = ... }` | a full-screen shader, given what is drawn over it as `u_tex` (a lock screen's clock, from `wallpaper.widget`); `color` is what the `wl_shm` renderer shows instead |
+| `function(ctx) return widget end`, `{ view = fn }` | anything a view can draw: canvases, images, text |
+| `{ plugin = "name", options = {...}, widget = "name.type", props = {...} }` | a native plugin's widget, loaded on first use |
+
+| Option | Default | |
+|---|---|---|
+| `default` | | the rice's own wallpaper |
+| `source` | | the config's choice, which beats a dropped picture |
+| `outputs` | `{}` | sources by output name |
+| `fit` | `"cover"` | how pictures fill the output (see `shell.image`) |
+| `color` | | drawn under everything, and in the bars `contain` leaves |
+| `interval` | 600 | seconds per picture in a folder; 0 to stay on one |
+| `order` | `"name"` | or `"random"` |
+| `transition` | `true` | the cross-fade: `false`, or a spring `{stiffness, damping}` |
+| `drop_in` | `true` | look for pictures in `~/.config/shady` |
+| `remember` | `true` | honour `set` and the state file |
+| `name` | `"wallpaper"` | the layer's namespace, for `shady.layer_effect` (first call only) |
+
+`install` declares one background layer on every output the first time it
+is called; later calls change only the options they pass, so a config built
+on a rice with `shell.base` can call it again with its own `source`. The
+module also has:
+
+| Function | |
+|---|---|
+| `wallpaper.widget(ctx[, output])` | the output's wallpaper as a widget the size of `ctx`, e.g. under a lock screen's clock |
+| `wallpaper.set(source[, output])`, `wallpaper.clear([output])` | choose (paths and colours are remembered), or go back to the config's |
+| `wallpaper.next([output])`, `wallpaper.previous([output])` | move a slideshow on or back |
+| `wallpaper.current([output])` | `{kind, path, fit, folder, origin}`: `kind` is `picture`, `shader`, `view`, `widget`, `color` or `none`; `origin` is `set`, `config`, `file`, `rice` or `none` |
+| `wallpaper.is_picture(name)` | whether a file name has an extension this shell reads |
+
+From a terminal, or a compositor key binding:
+
+```sh
+shady-wallpaper set ~/Pictures/sea.jpg        # every output
+shady-wallpaper set ~/Pictures/walls DP-1     # a slideshow on one
+shady-wallpaper next
+shady-wallpaper clear
 ```
 
 ## Lock screen

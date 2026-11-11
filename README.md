@@ -45,7 +45,10 @@ The shell loads the first of these it finds:
    and each `$XDG_DATA_DIRS/shady/rices`
 4. [default.lua](default.lua) (also what `SHADY_RICE=none` means)
 
-The file is reloaded as you edit it. `shell.base("tide", { ... })` at the top
+The file is reloaded as you edit it. For a wallpaper, save a picture as
+`~/.config/shady/wallpaper.jpg` (or `.png`, `.webp`; a folder
+`~/.config/shady/wallpapers` is a slideshow) or run `shady-wallpaper set
+PATH`; it replaces the rice's own ([Wallpaper](docs/SHELL_LUA_API.md#wallpaper)). `shell.base("tide", { ... })` at the top
 of your own config starts from a rice and changes what you pass it.
 
 - [Shell Lua API](docs/SHELL_LUA_API.md): views, widgets, windows, notifications,
@@ -65,7 +68,8 @@ meson test -C build
 ```
 
 Outside Nix it needs meson, wayland-scanner, wayland, wayland-protocols,
-wlr-protocols, xkbcommon, cairo, pango, fontconfig and Lua 5.4; EGL/GLESv2,
+wlr-protocols, xkbcommon, cairo, pango, fontconfig and Lua 5.4; libjpeg and
+libwebp (wallpapers besides PNG), EGL/GLESv2,
 libsystemd (notifications over D-Bus) and PAM (`shady-auth`, the lock
 screen's password check) are optional.
 

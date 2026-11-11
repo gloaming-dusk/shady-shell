@@ -8,7 +8,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <sys/stat.h>
+
 #include "anim.h"
+#include "image.h"
 #include "theme.h"
 
 #define UI_MAX_DEPTH 48
@@ -294,27 +297,167 @@ static const char *field_string(lua_State *L, int t, const char *key, char *buf,
     return s ? buf : NULL;
 }
 
+/* Decoded pictures by path, kept while the file's size and modification
+ * time stay the same, so that a wallpaper replaced on disk is read again.
+ * Failures are remembered as well: a broken file is not decoded on every
+ * repaint, and its error is logged once. */
 static struct {
     char *path;
-    cairo_surface_t *surface;
+    cairo_surface_t *surface; /* NULL: the file could not be read */
+    struct timespec mtime;
+    off_t size;
+    char error[160];
 } image_cache[IMAGE_CACHE];
 
+cairo_surface_t *ui_image(const char *path, char *error, size_t error_size) {
+    struct stat st;
+    if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) {
+        snprintf(error, error_size, "no such file");
+        return NULL;
+    }
+    for (int i = 0; i < IMAGE_CACHE; i++) {
+        if (!image_cache[i].path || strcmp(image_cache[i].path, path)) continue;
+        if (image_cache[i].size == st.st_size &&
+                image_cache[i].mtime.tv_sec == st.st_mtim.tv_sec &&
+                image_cache[i].mtime.tv_nsec == st.st_mtim.tv_nsec) {
+            snprintf(error, error_size, "%s", image_cache[i].error);
+            return image_cache[i].surface ? cairo_surface_reference(image_cache[i].surface) : NULL;
+        }
+        /* Changed on disk: decode it again into the same slot. */
+        free(image_cache[i].path);
+        if (image_cache[i].surface) cairo_surface_destroy(image_cache[i].surface);
+        image_cache[i].path = NULL;
+        image_cache[i].surface = NULL;
+    }
+    static int next;
+    int slot = -1;
+    for (int i = 0; i < IMAGE_CACHE && slot < 0; i++)
+        if (!image_cache[i].path) slot = i;
+    if (slot < 0) slot = next++ % IMAGE_CACHE;
+    free(image_cache[slot].path);
+    if (image_cache[slot].surface) cairo_surface_destroy(image_cache[slot].surface);
+    char why[160] = "";
+    cairo_surface_t *surface = shell_image_load(path, why, sizeof(why));
+    if (!surface) fprintf(stderr, "shady-shell: %s: %s\n", path, why);
+    image_cache[slot].path = strdup(path);
+    image_cache[slot].surface = surface ? cairo_surface_reference(surface) : NULL;
+    image_cache[slot].mtime = st.st_mtim;
+    image_cache[slot].size = st.st_size;
+    snprintf(image_cache[slot].error, sizeof(image_cache[slot].error), "%s", why);
+    snprintf(error, error_size, "%s", why);
+    return surface;
+}
+
 static cairo_surface_t *load_image(const char *path) {
-    for (int i = 0; i < IMAGE_CACHE; i++)
-        if (image_cache[i].path && !strcmp(image_cache[i].path, path))
-            return cairo_surface_reference(image_cache[i].surface);
-    cairo_surface_t *surface = cairo_image_surface_create_from_png(path);
+    char error[160];
+    return ui_image(path, error, sizeof(error));
+}
+
+/* A picture drawn much smaller (or larger) than it is would be filtered on
+ * every repaint, which for a full-screen wallpaper is most of a frame.
+ * Instead it keeps one copy at the size it was last drawn, in device
+ * pixels, attached to the decoded surface. */
+struct scaled_copy {
+    cairo_surface_t *surface;
+    int width, height;
+};
+
+static const cairo_user_data_key_t scaled_key;
+
+static void free_scaled(void *data) {
+    struct scaled_copy *copy = data;
+    if (copy->surface) cairo_surface_destroy(copy->surface);
+    free(copy);
+}
+
+static cairo_surface_t *scaled_image(cairo_surface_t *image, int width, int height) {
+    int iw = cairo_image_surface_get_width(image), ih = cairo_image_surface_get_height(image);
+    if (width <= 0 || height <= 0 || (width == iw && height == ih) ||
+            width > 2 * SHELL_IMAGE_MAX_SIDE || height > 2 * SHELL_IMAGE_MAX_SIDE)
+        return NULL;
+    struct scaled_copy *copy = cairo_surface_get_user_data(image, &scaled_key);
+    if (copy && copy->surface && copy->width == width && copy->height == height) return copy->surface;
+    cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
     if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
         cairo_surface_destroy(surface);
         return NULL;
     }
-    static int next;
-    int slot = next++ % IMAGE_CACHE;
-    free(image_cache[slot].path);
-    if (image_cache[slot].surface) cairo_surface_destroy(image_cache[slot].surface);
-    image_cache[slot].path = strdup(path);
-    image_cache[slot].surface = cairo_surface_reference(surface);
+    cairo_t *cr = cairo_create(surface);
+    cairo_scale(cr, (double)width / iw, (double)height / ih);
+    cairo_set_source_surface(cr, image, 0, 0);
+    cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_GOOD);
+    cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_PAD);
+    cairo_paint(cr);
+    cairo_destroy(cr);
+    if (!copy) {
+        copy = calloc(1, sizeof(*copy));
+        if (!copy || cairo_surface_set_user_data(image, &scaled_key, copy, free_scaled)
+                != CAIRO_STATUS_SUCCESS) {
+            free(copy);
+            cairo_surface_destroy(surface);
+            return NULL;
+        }
+    }
+    if (copy->surface) cairo_surface_destroy(copy->surface);
+    copy->surface = surface;
+    copy->width = width;
+    copy->height = height;
     return surface;
+}
+
+/* Draw an image into the box (x, y, w, h) as `fit` says. */
+static void draw_image(cairo_t *cr, cairo_surface_t *image, int fit,
+        double x, double y, double w, double h) {
+    double iw = cairo_image_surface_get_width(image), ih = cairo_image_surface_get_height(image);
+    if (iw <= 0 || ih <= 0 || w <= 0 || h <= 0) return;
+    cairo_save(cr);
+    cairo_rectangle(cr, x, y, w, h);
+    cairo_clip(cr);
+    if (fit == UI_FIT_TILE) {
+        cairo_set_source_surface(cr, image, x, y);
+        cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_REPEAT);
+        cairo_paint(cr);
+        cairo_restore(cr);
+        return;
+    }
+    /* Where the whole picture goes, in user space. */
+    double dw = w, dh = h;
+    if (fit == UI_FIT_COVER || fit == UI_FIT_CONTAIN) {
+        double sx = w / iw, sy = h / ih;
+        double s = fit == UI_FIT_COVER ? fmax(sx, sy) : fmin(sx, sy);
+        dw = iw * s;
+        dh = ih * s;
+    } else if (fit == UI_FIT_CENTER) {
+        dw = iw;
+        dh = ih;
+    }
+    double dx = x + (w - dw) / 2, dy = y + (h - dh) / 2;
+    /* The same in device pixels: with no rotation, a copy of exactly that
+     * size is painted 1:1. */
+    double xx = 1, yx = 0, xy = 0, yy = 1;
+    cairo_user_to_device_distance(cr, &xx, &yx);
+    cairo_user_to_device_distance(cr, &xy, &yy);
+    cairo_surface_t *source = image;
+    double sw = iw, sh = ih;
+    if (fabs(yx) < 1e-6 && fabs(xy) < 1e-6 && xx > 0 && yy > 0) {
+        int pw = (int)lround(dw * xx), ph = (int)lround(dh * yy);
+        cairo_surface_t *copy = scaled_image(image, pw, ph);
+        if (copy) {
+            source = copy;
+            sw = pw;
+            sh = ph;
+        }
+    }
+    cairo_translate(cr, dx, dy);
+    cairo_scale(cr, dw / sw, dh / sh);
+    cairo_set_source_surface(cr, source, 0, 0);
+    /* Padded so that its edges are not filtered against transparency, and
+     * filled over its own rectangle only, so that the padding does not
+     * spread into the bars `contain` leaves. */
+    cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_PAD);
+    cairo_rectangle(cr, 0, 0, sw, sh);
+    cairo_fill(cr);
+    cairo_restore(cr);
 }
 
 bool ui_read_uniforms(lua_State *L, int index, struct shell_uniform *out, size_t max,
@@ -758,6 +901,12 @@ static struct ui_node *build_node(struct build *b, int t, int depth) {
         char *path = get_string(L, t, "path");
         if (path) node->image = load_image(path);
         free(path);
+        char fit[16];
+        static const char *const fits[] = { "fill", "cover", "contain", "center", "tile" };
+        node->fit = UI_FIT_FILL;
+        if (field_string(L, t, "fit", fit, sizeof(fit)))
+            for (int i = 0; i < 5; i++)
+                if (!strcmp(fit, fits[i])) node->fit = i;
         break;
     }
     case UI_NODE_ICON: {
@@ -1837,18 +1986,7 @@ void ui_draw(cairo_t *cr, const struct ui_node *node, const struct ui_node *hove
         }
         break;
     case UI_NODE_IMAGE:
-        if (node->image) {
-            double iw = cairo_image_surface_get_width(node->image);
-            double ih = cairo_image_surface_get_height(node->image);
-            if (iw > 0 && ih > 0) {
-                cairo_save(cr);
-                cairo_translate(cr, x, y);
-                cairo_scale(cr, w / iw, h / ih);
-                cairo_set_source_surface(cr, node->image, 0, 0);
-                cairo_paint(cr);
-                cairo_restore(cr);
-            }
-        }
+        if (node->image) draw_image(cr, node->image, node->fit, x, y, w, h);
         break;
     case UI_NODE_BOX:
         for (size_t i = 0; i < node->child_count; i++)
@@ -1979,7 +2117,7 @@ static uint64_t node_hash(const struct ui_node *n, uint64_t h, bool *dynamic, bo
     h = HASH(h, n->letter_spacing); h = HASH(h, n->ellipsize); h = HASH(h, n->text_align);
     h = HASH(h, n->wrap); h = HASH(h, n->max_lines);
     h = HASH(h, n->pip_radius); h = HASH(h, n->lit);
-    h = HASH(h, n->image);
+    h = HASH(h, n->image); h = HASH(h, n->fit);
     h = hash_string(h, n->icon);
     h = HASH(h, n->stroke);
     h = HASH(h, n->shape_count);

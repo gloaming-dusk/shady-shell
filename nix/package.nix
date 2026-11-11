@@ -16,6 +16,8 @@
   fontconfig,
   systemd,
   linux-pam,
+  libjpeg,
+  libwebp,
 }:
 
 stdenv.mkDerivation {
@@ -29,6 +31,7 @@ stdenv.mkDerivation {
       ../meson_options.txt
       ../default.lua
       ../shortcut_overlay.lua
+      ../wallpaper.lua
       ../bin
       ../examples
       ../fonts
@@ -46,13 +49,15 @@ stdenv.mkDerivation {
   nativeBuildInputs = [ meson ninja pkg-config wayland-scanner ];
   buildInputs = [
     wayland wayland-protocols wlr-protocols libxkbcommon libGL lua5_4
-    cairo pango fontconfig systemd linux-pam
+    cairo pango fontconfig systemd linux-pam libjpeg libwebp
   ];
 
   mesonBuildType = "release";
   mesonFlags = [
     (lib.mesonBool "installed_data" true)
     (lib.mesonEnable "pam" true)
+    (lib.mesonEnable "jpeg" true)
+    (lib.mesonEnable "webp" true)
   ];
 
   doCheck = true;

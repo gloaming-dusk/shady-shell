@@ -1,0 +1,82 @@
+#!/bin/sh
+# Choose the wallpaper of a running shady-shell (any config that uses
+# require("wallpaper"), as the default UI does), and keep the choice for
+# the next session.
+#
+#   shady-wallpaper set PATH [OUTPUT]   a picture or a folder of them (a slideshow)
+#   shady-wallpaper set '#RRGGBB' [OUTPUT]
+#   shady-wallpaper clear [OUTPUT]      back to the config's, the dropped file's
+#                                       or the rice's wallpaper
+#   shady-wallpaper next | previous     the next picture of a slideshow
+#   shady-wallpaper get                 what has been chosen
+#
+# Without OUTPUT, the choice is for every output. It is written to
+# $XDG_STATE_HOME/shady/wallpaper, which the shell watches.
+set -eu
+
+dir="${XDG_STATE_HOME:-$HOME/.local/state}/shady"
+state="$dir/wallpaper"
+
+usage() {
+    sed -n '2,13s/^# \{0,1\}//p' "$0" >&2
+    exit 2
+}
+
+# The state without the lines for $1 (an output, "*" or "@next").
+without() {
+    [ -f "$state" ] || return 0
+    awk -v key="$1" '$1 != key' "$state"
+}
+
+write() { # write <content>: replace the state at once, so the shell never reads half of it
+    mkdir -p "$dir"
+    printf '%s' "$1" > "$state.new"
+    mv -f "$state.new" "$state"
+}
+
+lines() { # the current state, as text with a trailing newline per line
+    [ -f "$state" ] && cat "$state" || true
+}
+
+case "${1:-}" in
+    set)
+        [ $# -ge 2 ] && [ $# -le 3 ] || usage
+        source=$2
+        output=${3:-*}
+        case "$source" in
+            \#*) ;;
+            *)
+                [ -e "$source" ] || { echo "shady-wallpaper: $source: no such file" >&2; exit 1; }
+                case "$source" in /*) ;; *) source="$PWD/$source" ;; esac
+                ;;
+        esac
+        if [ "$output" = "*" ]; then
+            # Everywhere replaces the outputs' own choices.
+            rest=$(lines | awk '$1 == "@next"')
+        else
+            rest=$(without "$output")
+        fi
+        write "$(printf '%s\n%s %s' "$rest" "$output" "$source" | sed '/^$/d')
+"
+        ;;
+    clear)
+        [ $# -le 2 ] || usage
+        write "$(without "${2:-*}" | sed '/^$/d')
+"
+        ;;
+    next|previous)
+        step=1
+        [ "$1" = previous ] && step=-1
+        n=$( (lines | awk '$1 == "@next" { print $2 }') || true)
+        n=$(( ${n:-0} + step ))
+        write "$(without @next | sed '/^$/d')
+@next $n
+"
+        ;;
+    get)
+        lines | grep -v '^@next' || true
+        ;;
+    *)
+        usage
+        ;;
+esac

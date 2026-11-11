@@ -3,6 +3,7 @@
 #include "script.h"
 
 #include <errno.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <fontconfig/fontconfig.h>
 #include <lauxlib.h>
@@ -25,6 +26,7 @@
 #include "anim.h"
 #include "auth.h"
 #include "compositor.h"
+#include "image.h"
 #include "notify.h"
 #include "plugins.h"
 #include "render.h"
@@ -147,6 +149,7 @@ struct shell_lua {
     struct shell_timer *date_timer;
     struct wl_list afters; /* after.link */
     struct wl_list auths; /* lua_auth.link */
+    struct wl_list watches; /* file_watch.link */
     int next_after;
     int in_view; /* >0 while a view function runs */
 };
@@ -167,6 +170,19 @@ struct after {
     struct shell_timer *timer;
     int ref;
     int id;
+};
+
+/* shell.watch(path, fn): fn runs, debounced, when a file in the directory
+ * (or the file) changes. */
+struct file_watch {
+    struct wl_list link;
+    struct shell_lua *lua;
+    int fd; /* its own inotify instance */
+    struct shell_watch *watch;
+    struct shell_timer *debounce;
+    int ref;
+    int id;
+    char *name; /* when watching a file: its name in the watched directory */
 };
 
 /* Config file location and reload watching outlive generations. */
@@ -2145,9 +2161,209 @@ static int l_cancel(lua_State *L) {
     return 1;
 }
 
+/* ---- the `shell` API: files ----------------------------------------- */
+
+static void push_stat(lua_State *L, const struct stat *st) {
+    lua_createtable(L, 0, 4);
+    lua_pushboolean(L, S_ISDIR(st->st_mode));
+    lua_setfield(L, -2, "dir");
+    lua_pushinteger(L, (lua_Integer)st->st_mtim.tv_sec);
+    lua_setfield(L, -2, "mtime");
+    lua_pushinteger(L, (lua_Integer)st->st_size);
+    lua_setfield(L, -2, "size");
+}
+
+/* shell.stat(path): {dir, mtime, size} (following symlinks) or nil. */
+static int l_stat(lua_State *L) {
+    struct stat st;
+    if (stat(luaL_checkstring(L, 1), &st) != 0) {
+        lua_pushnil(L);
+        return 1;
+    }
+    push_stat(L, &st);
+    return 1;
+}
+
+static int compare_names(const void *a, const void *b) {
+    return strcmp(*(char *const *)a, *(char *const *)b);
+}
+
+#define MAX_LISTED 4096
+
+/* shell.files(dir): what the directory holds, sorted by name, without the
+ * hidden entries: {name, path, dir, mtime, size} each; nil and a message if
+ * it cannot be read. */
+static int l_files(lua_State *L) {
+    const char *dir = luaL_checkstring(L, 1);
+    DIR *d = opendir(dir);
+    if (!d) {
+        lua_pushnil(L);
+        lua_pushstring(L, strerror(errno));
+        return 2;
+    }
+    char **names = NULL;
+    size_t count = 0, cap = 0;
+    struct dirent *entry;
+    while ((entry = readdir(d)) && count < MAX_LISTED) {
+        if (entry->d_name[0] == '.') continue;
+        if (count == cap) {
+            size_t ncap = cap ? cap * 2 : 64;
+            char **grown = realloc(names, ncap * sizeof(*names));
+            if (!grown) break;
+            names = grown;
+            cap = ncap;
+        }
+        if (!(names[count] = strdup(entry->d_name))) break;
+        count++;
+    }
+    closedir(d);
+    if (count) qsort(names, count, sizeof(*names), compare_names);
+    lua_createtable(L, (int)count, 0);
+    int n = 0;
+    for (size_t i = 0; i < count; i++) {
+        char path[2 * PATH_MAX];
+        snprintf(path, sizeof(path), "%s/%s", dir, names[i]);
+        struct stat st;
+        if (stat(path, &st) == 0) { /* a dangling link is not listed */
+            push_stat(L, &st);
+            lua_pushstring(L, names[i]);
+            lua_setfield(L, -2, "name");
+            lua_pushstring(L, path);
+            lua_setfield(L, -2, "path");
+            lua_rawseti(L, -2, ++n);
+        }
+        free(names[i]);
+    }
+    free(names);
+    return 1;
+}
+
+/* shell.image_size(path): the picture's width and height, decoding it (and
+ * keeping it for shell.image); nil and why when it cannot be read. */
+static int l_image_size(lua_State *L) {
+    char error[160];
+    cairo_surface_t *image = ui_image(luaL_checkstring(L, 1), error, sizeof(error));
+    if (!image) {
+        lua_pushnil(L);
+        lua_pushstring(L, error);
+        return 2;
+    }
+    lua_pushinteger(L, cairo_image_surface_get_width(image));
+    lua_pushinteger(L, cairo_image_surface_get_height(image));
+    cairo_surface_destroy(image);
+    return 2;
+}
+
+#define WATCH_DEBOUNCE_MS 150
+
+static void file_watch_free(struct file_watch *w) {
+    wl_list_remove(&w->link);
+    shell_timer_cancel(w->debounce);
+    shell_watch_remove(w->watch);
+    if (w->fd >= 0) close(w->fd);
+    if (w->lua->L) luaL_unref(w->lua->L, LUA_REGISTRYINDEX, w->ref);
+    free(w->name);
+    free(w);
+}
+
+static void file_watch_fire(void *data) {
+    struct file_watch *w = data;
+    w->debounce = NULL;
+    lua_State *L = w->lua->L;
+    lua_rawgeti(L, LUA_REGISTRYINDEX, w->ref);
+    call(L, 0, 0, "watch", NULL, 0);
+    redraw_all(w->lua);
+}
+
+static void file_watch_event(int fd, short revents, void *data) {
+    (void)revents;
+    struct file_watch *w = data;
+    char buffer[4096] __attribute__((aligned(__alignof__(struct inotify_event))));
+    bool relevant = false;
+    for (;;) {
+        ssize_t n = read(fd, buffer, sizeof(buffer));
+        if (n <= 0) break;
+        for (char *p = buffer; p < buffer + n;) {
+            struct inotify_event *event = (struct inotify_event *)p;
+            if (!w->name || (event->len && !strcmp(event->name, w->name)) ||
+                    (event->mask & IN_IGNORED))
+                relevant = true;
+            p += sizeof(*event) + event->len;
+        }
+    }
+    if (!relevant) return;
+    shell_timer_cancel(w->debounce);
+    w->debounce = shell_timer_add(&w->lua->shell->core, WATCH_DEBOUNCE_MS, file_watch_fire, w);
+}
+
+/* shell.watch(path, fn): call fn (after changes settle) whenever a file is
+ * written, added, removed or renamed in the directory `path`, or when the
+ * file `path` is, which may not exist yet. Returns an id for
+ * shell.unwatch(id), or nil and why. */
+static int l_watch(lua_State *L) {
+    const char *path = luaL_checkstring(L, 1);
+    luaL_checktype(L, 2, LUA_TFUNCTION);
+    struct shell_lua *lua = lua_of(L);
+    char dir[PATH_MAX];
+    snprintf(dir, sizeof(dir), "%s", path);
+    const char *name = NULL;
+    struct stat st;
+    if (stat(dir, &st) != 0 || !S_ISDIR(st.st_mode)) {
+        char *slash = strrchr(dir, '/');
+        if (!slash || !slash[1]) {
+            lua_pushnil(L);
+            lua_pushstring(L, "not a directory, nor a file in one");
+            return 2;
+        }
+        name = path + (slash - dir) + 1;
+        if (slash == dir) slash[1] = '\0';
+        else *slash = '\0';
+    }
+    struct file_watch *w = calloc(1, sizeof(*w));
+    if (!w) return luaL_error(L, "out of memory");
+    w->lua = lua;
+    w->ref = LUA_NOREF;
+    w->fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+    wl_list_insert(&lua->watches, &w->link);
+    if (w->fd < 0 || inotify_add_watch(w->fd, dir, IN_CLOSE_WRITE | IN_MOVED_TO |
+            IN_MOVED_FROM | IN_CREATE | IN_DELETE | IN_ATTRIB) < 0 ||
+            (name && !(w->name = strdup(name))) ||
+            !(w->watch = shell_watch_add(&lua->shell->core, w->fd, POLLIN, file_watch_event, w))) {
+        int err = errno;
+        file_watch_free(w);
+        lua_pushnil(L);
+        lua_pushfstring(L, "cannot watch %s: %s", dir, strerror(err));
+        return 2;
+    }
+    lua_pushvalue(L, 2);
+    w->ref = luaL_ref(L, LUA_REGISTRYINDEX);
+    w->id = ++lua->next_after;
+    lua_pushinteger(L, w->id);
+    return 1;
+}
+
+static int l_unwatch(lua_State *L) {
+    lua_Integer id = luaL_checkinteger(L, 1);
+    struct shell_lua *lua = lua_of(L);
+    struct file_watch *w;
+    wl_list_for_each(w, &lua->watches, link) {
+        if (w->id != id) continue;
+        file_watch_free(w);
+        lua_pushboolean(L, 1);
+        return 1;
+    }
+    lua_pushboolean(L, 0);
+    return 1;
+}
+
 static const luaL_Reg api[] = {
     { "log", l_log },
     { "after", l_after },
+    { "stat", l_stat },
+    { "files", l_files },
+    { "image_size", l_image_size },
+    { "watch", l_watch },
+    { "unwatch", l_unwatch },
     { "lock", l_lock },
     { "unlock", l_unlock },
     { "locked", l_locked },
@@ -2247,6 +2463,8 @@ static void generation_free(struct shell_lua *lua) {
         wl_list_remove(&after->link);
         free(after);
     }
+    struct file_watch *fw, *fwtmp;
+    wl_list_for_each_safe(fw, fwtmp, &lua->watches, link) file_watch_free(fw);
     if (lua->L) lua_close(lua->L);
     free(lua);
 }
@@ -2259,6 +2477,7 @@ static struct shell_lua *generation_load(struct shell *shell, const char *path) 
     wl_list_init(&lua->polls);
     wl_list_init(&lua->afters);
     wl_list_init(&lua->auths);
+    wl_list_init(&lua->watches);
     lua_State *L = lua->L = luaL_newstate();
     if (!L) {
         free(lua);
@@ -2277,6 +2496,16 @@ static struct shell_lua *generation_load(struct shell *shell, const char *path) 
     lua_setfield(L, -2, "data_dir");
     lua_pushstring(L, path);
     lua_setfield(L, -2, "config_path");
+    lua_newtable(L);
+    for (const char *const *f = shell_image_formats(); *f; f++) {
+        lua_pushstring(L, *f);
+        lua_rawseti(L, -2, (lua_Integer)(f - shell_image_formats()) + 1);
+    }
+    lua_setfield(L, -2, "image_formats");
+    /* "gl" or "shm": whether shader effects are drawn. */
+    if (shell->core.renderer) lua_pushstring(L, shell->core.renderer->impl->name);
+    else lua_pushnil(L);
+    lua_setfield(L, -2, "renderer");
     lua_pushvalue(L, -1);
     lua_setglobal(L, "shell");
     if (luaL_loadstring(L, prelude) != LUA_OK) abort(); /* a bug in the prelude */
