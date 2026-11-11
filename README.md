@@ -22,6 +22,15 @@ This runs Shady in a window with the shell's own `default.lua` and a terminal.
 Most people get the shell through a desktop built on it, such as
 [Gloam](https://github.com/gloaming-dusk/gloam) and its Tide desktop.
 
+On NixOS, this flake's module installs it with the PAM services its lock
+screen uses; Shady starts the `shady-shell` it finds on `PATH`:
+
+```nix
+imports = [ shady-shell.nixosModules.default ];
+programs.shady-shell.enable = true;
+programs.shady-shell.lock.fingerprint = true;   # optional, with fprintd
+```
+
 ## Configuration
 
 The shell loads the first of these it finds:

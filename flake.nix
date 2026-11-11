@@ -18,6 +18,11 @@
         default = shady-shell;
       });
 
+      nixosModules = rec {
+        shady-shell = import ./nix/module.nix self;
+        default = shady-shell;
+      };
+
       overlays.default = final: prev: {
         shady-shell = shellFor final;
       };

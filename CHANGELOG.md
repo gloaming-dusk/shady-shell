@@ -11,6 +11,9 @@
   `$SHADY_ROOT/rices` and `$XDG_DATA_DIRS/shady/rices`, file by file, so a
   rice's `shell.lua` can be installed by a different package than its
   compositor config.
+- NixOS: `programs.shady-shell` (`enable`, `package`, `plugins`,
+  `lock.fingerprint`), which installs the shell and its `shady-lock` PAM
+  services; `programs.shady.lock.fingerprint` moved here.
 - `tests/run.sh` runs the headless tests against any Shady on `PATH`.
 
 Earlier changes are in Shady's changelog, up to its 0.2.0.
