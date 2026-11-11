@@ -1,0 +1,2 @@
+option('installed_data', type: 'boolean', value: false, description: 'Read the shell data (default.lua, shaders) from the install prefix instead of the source tree')
+option('pam', type: 'feature', value: 'auto', description: 'Build shady-auth, the PAM helper the lock screen checks passwords with')

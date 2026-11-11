@@ -5,7 +5,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-BUILD_DIR="${SHADY_DAILY_BUILD_DIR:-build-daily-driver}"
+BUILD_DIR="${SHADY_DAILY_BUILD_DIR:-build}"
 for bin in shady shady-shell shadyctl; do
     [[ -x "$BUILD_DIR/$bin" ]] || { echo "shell-outputs: missing $BUILD_DIR/$bin" >&2; exit 2; }
 done
@@ -25,7 +25,7 @@ run() {
         export SHADY_LUA_INIT="$ROOT/tests/headless-shell-outputs-init.lua"
         export SHADY_SHELL_BIN="$ROOT/$BUILD_DIR/shady-shell"
         export SHADY_SHELL_RENDERER="$renderer"
-        export SHADY_SHELL_CONFIG="$ROOT/shell/default.lua"
+        export SHADY_SHELL_CONFIG="$ROOT/default.lua"
         export ASAN_OPTIONS="${ASAN_OPTIONS:-abort_on_error=1:halt_on_error=1:detect_leaks=0}"
         export UBSAN_OPTIONS="${UBSAN_OPTIONS:-halt_on_error=1:print_stacktrace=1}"
         exec "$BUILD_DIR/shady" --safe -c "$ROOT/tests/headless-automation-config.lua"

@@ -7,7 +7,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-BUILD_DIR="${SHADY_DAILY_BUILD_DIR:-build-daily-driver}"
+BUILD_DIR="${SHADY_DAILY_BUILD_DIR:-build}"
 for bin in shady shady-shell shadyctl libshady-shell-plugin-probe.so libshady-shell-plugin-sysinfo.so; do
     [[ -e "$BUILD_DIR/$bin" ]] || { echo "shell-plugin: missing $BUILD_DIR/$bin" >&2; exit 2; }
 done

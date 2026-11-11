@@ -3,12 +3,12 @@
 `shady-shell` loads native plugins for what its Lua config cannot do well:
 talk to system services, keep long-lived sockets open, draw custom
 widgets. The header is [`include/shady/shell_plugin.h`](../include/shady/shell_plugin.h);
-[`shell/plugins/sysinfo.c`](../shell/plugins/sysinfo.c)
-is a complete plugin and [`shell/examples/sysinfo.lua`](../shell/examples/sysinfo.lua)
+[`shell/plugins/sysinfo.c`](../plugins/sysinfo.c)
+is a complete plugin and [`shell/examples/sysinfo.lua`](../examples/sysinfo.lua)
 uses it.
 
 Shell plugins are separate from compositor plugins
-([C_PLUGIN_API.md](C_PLUGIN_API.md)). They run in the shell process: a
+([C_PLUGIN_API.md](https://github.com/gloaming-dusk/shady/blob/main/docs/C_PLUGIN_API.md)). They run in the shell process: a
 crashing shell plugin takes down the shell, never the compositor.
 
 ## Talking to Lua

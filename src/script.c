@@ -1632,6 +1632,56 @@ static int l_reload(lua_State *L) {
     return 0;
 }
 
+/* ---- rices --------------------------------------------------------------- */
+
+/* Whether <dir>/<rice>/<file> is there; the path goes to out. */
+static bool rice_in(const char *dir, size_t dir_len, const char *rice, const char *file,
+        char *out, size_t size) {
+    if (dir_len == 0) return false;
+    int written = snprintf(out, size, "%.*s/%s/%s", (int)dir_len, dir, rice, file);
+    return written > 0 && (size_t)written < size && access(out, R_OK) == 0;
+}
+
+static bool rice_in_list(const char *list, const char *suffix, const char *rice,
+        const char *file, char *out, size_t size) {
+    if (!list) return false;
+    while (*list) {
+        size_t len = strcspn(list, ":");
+        char dir[PATH_MAX];
+        int written = snprintf(dir, sizeof(dir), "%.*s%s", (int)len, list, suffix);
+        if (len > 0 && written > 0 && (size_t)written < sizeof(dir) &&
+                rice_in(dir, (size_t)written, rice, file, out, size))
+            return true;
+        list += len;
+        if (*list == ':') list++;
+    }
+    return false;
+}
+
+/* A rice's file, found the way Shady finds it: $SHADY_RICE_PATH,
+ * $XDG_DATA_HOME/shady/rices, $SHADY_ROOT/rices, then each
+ * $XDG_DATA_DIRS/shady/rices. A rice may come in parts from several
+ * packages (the compositor's part of Tide, and its shell), so each file is
+ * looked for on its own. */
+static bool rice_file(const char *rice, const char *file, char *out, size_t size) {
+    if (!rice[0] || rice[0] == '.' || strchr(rice, '/')) return false;
+    if (rice_in_list(getenv("SHADY_RICE_PATH"), "", rice, file, out, size)) return true;
+    const char *data_home = getenv("XDG_DATA_HOME");
+    const char *home = getenv("HOME");
+    char dir[PATH_MAX] = "";
+    if (data_home && *data_home) snprintf(dir, sizeof(dir), "%s/shady/rices", data_home);
+    else if (home && *home) snprintf(dir, sizeof(dir), "%s/.local/share/shady/rices", home);
+    if (rice_in(dir, strlen(dir), rice, file, out, size)) return true;
+    const char *root = getenv("SHADY_ROOT");
+    if (root && *root) {
+        snprintf(dir, sizeof(dir), "%s/rices", root);
+        if (rice_in(dir, strlen(dir), rice, file, out, size)) return true;
+    }
+    const char *data_dirs = getenv("XDG_DATA_DIRS");
+    if (!data_dirs || !*data_dirs) data_dirs = "/usr/local/share:/usr/share";
+    return rice_in_list(data_dirs, "/shady/rices", rice, file, out, size);
+}
+
 /* shell.compositor_lua(code): run Lua in the compositor. */
 static int l_compositor_lua(lua_State *L) {
     lua_pushboolean(L, shell_compositor_lua(luaL_checkstring(L, 1)));
@@ -1645,7 +1695,8 @@ static int l_base(lua_State *L) {
     if (!rice[0] || rice[0] == '.' || strchr(rice, '/'))
         return luaL_error(L, "no such rice: %s", rice);
     char path[2 * PATH_MAX];
-    snprintf(path, sizeof(path), "%s/../rices/%s/shell.lua", host.data_dir, rice);
+    if (!rice_file(rice, "shell.lua", path, sizeof(path)))
+        return luaL_error(L, "no such rice: %s", rice);
     if (luaL_loadfile(L, path) != LUA_OK) return lua_error(L);
     lua_pushvalue(L, 2);
     lua_call(L, 1, 1);
@@ -2296,11 +2347,8 @@ static void resolve_paths(void) {
      * otherwise. SHADY_RICE=none is the plain default.lua. */
     const char *rice = getenv("SHADY_RICE");
     if (!rice || !*rice) rice = "tide";
-    if (strcmp(rice, "none") != 0 && rice[0] != '.' && !strchr(rice, '/')) {
-        int written = snprintf(host.config, sizeof(host.config), "%s/../rices/%s/shell.lua",
-            host.data_dir, rice);
-        if (written > 0 && (size_t)written < sizeof(host.config) && file_exists(host.config)) return;
-    }
+    if (strcmp(rice, "none") != 0 && rice_file(rice, "shell.lua", host.config, sizeof(host.config)))
+        return;
     snprintf(host.config, sizeof(host.config), "%s/default.lua", host.data_dir);
 }
 

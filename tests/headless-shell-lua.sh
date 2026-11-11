@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # The shell's Lua runtime: shell.poll and shell.listen feed views, a config
 # change on disk is hot-reloaded, a broken config keeps the running one, and
-# a config that fails at startup falls back to shell/default.lua.
+# a config that fails at startup falls back to default.lua.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-BUILD_DIR="${SHADY_DAILY_BUILD_DIR:-build-daily-driver}"
+BUILD_DIR="${SHADY_DAILY_BUILD_DIR:-build}"
 for bin in shady shady-shell shadyctl; do
     [[ -x "$BUILD_DIR/$bin" ]] || { echo "shell-lua: missing $BUILD_DIR/$bin" >&2; exit 2; }
 done
@@ -104,7 +104,7 @@ printf 'error("deliberately broken")\n' >"$config"
 comp=$!
 log="$startup_log"
 wait_for 1 "deliberately broken"
-wait_for 1 "shady-shell: falling back to $ROOT/shell/default.lua"
+wait_for 1 "shady-shell: falling back to $ROOT/default.lua"
 wait_for 1 "shady-shell: shady-shell on HEADLESS-1"
 XDG_RUNTIME_DIR="$tmp/runtime" "$BUILD_DIR/shadyctl" -s "$tmp/runtime/shady-wayland-0.sock" quit >/dev/null
 wait "$comp" || fail "compositor exited with an error"

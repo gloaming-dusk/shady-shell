@@ -1,0 +1,23 @@
+name: CI
+
+# Builds the shell (its meson tests run as part of the build). The headless
+# tests need a compositor and a render node; run them with tests/run.sh.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v16
+      - uses: DeterminateSystems/magic-nix-cache-action@v8
+      - name: Build and unit-test the shell
+        run: nix build -L .#default

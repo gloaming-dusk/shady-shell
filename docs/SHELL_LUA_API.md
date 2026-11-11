@@ -1,8 +1,8 @@
 # Shell Lua API
 
 `shady-shell` draws whatever its Lua config describes. The default desktop is
-itself a config, [`rices/tide/shell.lua`](../rices/tide/shell.lua), and so is
-the plainer [`shell/default.lua`](../shell/default.lua). Read either alongside
+itself a config, [`rices/tide/shell.lua`](https://github.com/gloaming-dusk/gloam/blob/main/rices/tide/shell.lua), and so is
+the plainer [`default.lua`](../default.lua). Read either alongside
 this page.
 
 ## Config file
@@ -11,19 +11,26 @@ The shell loads the first of:
 
 1. `$SHADY_SHELL_CONFIG`
 2. `$XDG_CONFIG_HOME/shady/shell.lua` (or `~/.config/shady/shell.lua`)
-3. the `shell.lua` of the rice in `$SHADY_RICE`, Tide when it is unset
-4. `shell/default.lua` from the data directory (`$SHADY_SHELL_DATA_DIR`
+3. the `shell.lua` of the rice in `$SHADY_RICE`, Tide when it is unset. A
+   rice is a directory named after it in `$SHADY_RICE_PATH` (colon-separated),
+   `$XDG_DATA_HOME/shady/rices`, `$SHADY_ROOT/rices` or
+   `$XDG_DATA_DIRS/shady/rices`, looked for in that order, the same places
+   Shady looks for the rice's `config.lua` and `init.lua`. Each file is found
+   on its own, so a rice can come in parts: Shady installs Tide's
+   compositor side and [Gloam](https://github.com/gloaming-dusk/gloam) its
+   `shell.lua`.
+4. `default.lua` from the data directory (`$SHADY_SHELL_DATA_DIR`
    overrides it), also for `SHADY_RICE=none`
 
 If your config fails to load at startup, the shell logs the error and
-falls back to `shell/default.lua`, unless `SHADY_SHELL_NO_FALLBACK=1` makes it exit
+falls back to `default.lua`, unless `SHADY_SHELL_NO_FALLBACK=1` makes it exit
 instead (the greeter does). Edits are picked up live: saving any `.lua` file
 in the config's directory reloads the config in a fresh Lua state. If the
 new version fails, the error is logged and the running UI stays as it was.
 `require` finds modules next to the config and in the data directory.
 
 To keep Tide and change a few things, start your config from it;
-[Customizing](CUSTOMIZING.md#build-on-it) lists the options and what it returns:
+[Customizing](https://github.com/gloaming-dusk/shady/blob/main/docs/CUSTOMIZING.md#build-on-it) lists the options and what it returns:
 
 ```lua
 local tide = shell.base("tide", { palette = { accent = "#FF9E64" } })
@@ -121,7 +128,7 @@ clickable things on it.
 A `persistent` popup is opened by the shell itself as soon as an output is
 ready, stays on one output, and moves to another when its output goes away
 (a monitor unplugged, a VT switch). The greeter's login card is one
-([GREETER.md](GREETER.md)).
+([GREETER.md](https://github.com/gloaming-dusk/shady-greeter/blob/main/README.md)).
 
 With `outputs = "all"` a popup is persistent on every output instead: one
 copy per output, following hotplug, each getting its own output as
@@ -333,7 +340,7 @@ Window arguments may also be the window tables themselves.
 `shell.poll` and `shell.listen` start their command the first time a view
 asks for it and keep it running for as long as the config is loaded. Any
 change in their value repaints the views. Together with `shadyctl
-subscribe` (see [IPC_API.md](IPC_API.md)) they cover most status widgets
+subscribe` (see [IPC_API.md](https://github.com/gloaming-dusk/shady/blob/main/docs/IPC_API.md)) they cover most status widgets
 without native code:
 
 ```lua
@@ -438,7 +445,7 @@ require("shortcut_overlay").install {
 It covers the output, dims what is behind, flows the groups into columns
 that fit the screen and closes on Escape, Enter or a click. The default
 UI, Horizon and Objects each install it with their own
-look ([`shell/shortcut_overlay.lua`](../shell/shortcut_overlay.lua)). A
+look ([`shell/shortcut_overlay.lua`](../shortcut_overlay.lua)). A
 config can also draw its own from `shell.shortcuts()`.
 
 ## Shader effects
@@ -464,7 +471,7 @@ shell.bar {
 - `shell.shader(path)` finds a fragment shader by absolute path, next to
   the config, or in the data directory, which ships
   `shaders/aurora.frag` and `shaders/glow.frag`.
-  [`shell/examples/aurora.lua`](../shell/examples/aurora.lua) puts both on
+  [`shell/examples/aurora.lua`](../examples/aurora.lua) puts both on
   the default UI.
 - A **surface shader** (`shader` on `shell.bar`/`shell.popup`) covers the
   whole surface. Its `uniforms` may be a table or a function returning one,
@@ -525,7 +532,7 @@ local accent = shell.compositor_value("afterglow.accent", shell.theme.accent)
 
 Plugins outlive config reloads. Writing them is covered in
 [SHELL_PLUGIN_API.md](SHELL_PLUGIN_API.md);
-[`shell/examples/sysinfo.lua`](../shell/examples/sysinfo.lua) adds a CPU
+[`shell/examples/sysinfo.lua`](../examples/sysinfo.lua) adds a CPU
 graph to the default bar with the bundled `sysinfo` plugin, through the
 default UI's `shell.options.bar_extra` hook.
 
@@ -537,9 +544,9 @@ in the compositor's `init.lua` blurs the scene behind every layer surface
 whose namespace is `name`. A bar's or popup's namespace is its `name` here
 (`"shady-shell"`, `"quick"`, `"menu"`, `"launcher"` in the default UI).
 Glass shows through translucent backgrounds, so pair it with
-[`shell/examples/glass.lua`](../shell/examples/glass.lua), which sets
+[`shell/examples/glass.lua`](../examples/glass.lua), which sets
 `shell.options.bar_opacity` and `panel_opacity`. See
-[LUA_API.md](LUA_API.md) for the options.
+[LUA_API.md](https://github.com/gloaming-dusk/shady/blob/main/docs/LUA_API.md) for the options.
 
 ## 3D placement
 
@@ -548,4 +555,4 @@ mode, with clicks mapped to where it is drawn:
 `shady.layer_transform("shady-shell", { tilt = -30, depth = 40 })` in the
 compositor's `init.lua` leans the default bar back from its top edge. Like
 `layer_effect`, it selects surfaces by namespace. See
-[LUA_API.md](LUA_API.md).
+[LUA_API.md](https://github.com/gloaming-dusk/shady/blob/main/docs/LUA_API.md).

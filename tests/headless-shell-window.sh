@@ -4,7 +4,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-BUILD_DIR="${SHADY_SPATIAL_TEST_BUILD_DIR:-build-spatial-asan}"
+BUILD_DIR="${SHADY_SPATIAL_TEST_BUILD_DIR:-build}"
 for bin in shady shady-shell; do
   [[ -x "$BUILD_DIR/$bin" ]] || { echo "shell-window: missing $BUILD_DIR/$bin" >&2; exit 2; }
 done

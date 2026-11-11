@@ -4,7 +4,7 @@ Status: phases 1 to 7 implemented (IPC, shell core and render, Lua UI,
 shader effects and native plugins in the shell; layer backdrop effects, 3D
 placement and standard protocols in the compositor). This document describes where `shady-shell` is
 going and why. API references for finished pieces live in their own
-documents ([IPC API](IPC_API.md), [Shell Lua API](SHELL_LUA_API.md),
+documents ([IPC API](https://github.com/gloaming-dusk/shady/blob/main/docs/IPC_API.md), [Shell Lua API](SHELL_LUA_API.md),
 [Shell plugin API](SHELL_PLUGIN_API.md)).
 
 ## Problem
@@ -63,7 +63,7 @@ tint or animate any widget.
 As in the compositor, shell plugins and Lua never see GL handles. They
 create programs, set uniforms, provide textures and request draws; the host
 owns GL state and frees everything on reload. Uniform names follow
-[SHADER_API.md](SHADER_API.md): `u_tex`, `u_time`, `u_resolution`,
+[SHADER_API.md](https://github.com/gloaming-dusk/shady/blob/main/docs/SHADER_API.md): `u_tex`, `u_time`, `u_resolution`,
 `u_params`, plus shell-specific `u_widget_size` and `u_hover`.
 
 ### Backdrop effects belong to the compositor
@@ -109,7 +109,7 @@ marks the surfaces dirty.
 C owns layout (a small flexbox), drawing, hit-testing and hover; Lua owns
 structure, style and behaviour. Widgets are `row`, `column`, `text`, `pip`,
 `image` and `spacer`; anything richer (task chips, workspace pills, menu
-rows) is a Lua function, as `shell/default.lua` shows. Popups are declared
+rows) is a Lua function, as `default.lua` shows. Popups are declared
 with `shell.popup{}` and opened with `shell.open(name, args)`.
 
 ## Phases
@@ -118,7 +118,7 @@ with `shell.popup{}` and opened with `shell.open(name, args)`.
    commands and event subscriptions, plus the `shadyctl` CLI. Published
    values (`publish_value`, `shady.publish`, `value.changed`) carry rice state
    such as the current hour to the shell (`shell.compositor_value`). Useful on its
-   own to scripts and other bars. See [IPC_API.md](IPC_API.md).
+   own to scripts and other bars. See [IPC_API.md](https://github.com/gloaming-dusk/shady/blob/main/docs/IPC_API.md).
 2. **Shell core and render** — done. One bar per output that follows
    hotplug and scale changes, integer HiDPI scaling, a poll loop with
    timers and fd watches, repaints coalesced on frame callbacks, and two
@@ -129,7 +129,7 @@ with `shell.popup{}` and opened with `shell.open(name, args)`.
    layout, hover and clicks, `shell.poll`/`shell.listen`/`shell.date`, popups
    that size themselves, and hot reload that keeps the running UI when a
    new config fails. The bar, launcher, task menu and Quick Settings now live
-   in `shell/default.lua`; the existing `headless-shell-*` tests pass
+   in `default.lua`; the existing `headless-shell-*` tests pass
    unchanged.
 4. **Shader effects** — done. Surface and widget fragment shaders with the
    cairo drawing as `u_tex`, host-supplied uniforms and Lua uniforms;
@@ -173,7 +173,7 @@ with `shell.popup{}` and opened with `shell.open(name, args)`.
 ## Code layout
 
 ```
-shell/src/
+src/
   core.c/.h        Wayland globals, outputs, seat input routing, layer
                    surfaces, timers, fd watches, the poll loop
   render.h         renderer interface: begin() gives a cairo image, end() commits
@@ -190,7 +190,7 @@ shell/src/
   effects.h        shader effects handed from Lua to the GL renderer
   plugins.c/.h     native shell plugins: loading, values, actions, widgets
   apps.c           .desktop index for the launcher
-shell/default.lua  the default UI
+default.lua        the default UI
 ```
 
 A surface is a `shell_surface` with a handler table. `shell_surface_redraw()`
