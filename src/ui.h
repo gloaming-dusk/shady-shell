@@ -7,7 +7,8 @@
  * repaint (see lua.c), so trees are immutable once built and simply freed
  * when the next one replaces them.
  *
- * Node types: box (row/column container), text, pip (focus dot), image.
+ * Node types: box (row/column container), text, pip (focus dot), image,
+ * icon, canvas (vector shapes) and plugin-drawn widgets.
  * The Lua-facing properties are documented in docs/SHELL_LUA_API.md.
  */
 
@@ -20,7 +21,8 @@
 
 #include "effects.h"
 
-enum ui_kind { UI_NODE_BOX, UI_NODE_TEXT, UI_NODE_PIP, UI_NODE_IMAGE, UI_NODE_CUSTOM, UI_NODE_ICON };
+enum ui_kind { UI_NODE_BOX, UI_NODE_TEXT, UI_NODE_PIP, UI_NODE_IMAGE, UI_NODE_CUSTOM, UI_NODE_ICON,
+    UI_NODE_CANVAS };
 
 /* A key/value table copied from Lua: plugin options and the properties of
  * plugin-drawn widgets (shady/shell_plugin.h calls it shady_shell_props). */
@@ -45,14 +47,15 @@ enum ui_align { UI_START, UI_CENTER, UI_END, UI_STRETCH, UI_SPACE_BETWEEN };
 struct ui_paint {
     int stops; /* 0 = none, 1 = solid, 2+ = gradient */
     double rgba[UI_MAX_STOPS][4];
-    char dir; /* 'v'ertical, 'h'orizontal, 'd'iagonal */
+    char dir; /* 'v'ertical, 'h'orizontal, 'd'iagonal, 'r'adial (centre outwards) */
 };
 
 /* Style fields a node sets; `hover`, `enter` and `exit` override the ones
  * they set. `scale`, `rotate` (degrees, both about the node's centre) and
  * `translate` move only the drawing: layout and hit-testing keep the
- * untransformed rectangle. `shadow` is a hard, offset copy of the node's
- * shape drawn behind it. */
+ * untransformed rectangle. `shadow` is an offset copy of the node's shape
+ * drawn behind it: hard, or soft over `shadow_blur` pixels (a glow, with no
+ * offset). */
 struct ui_style {
     struct ui_paint background;
     bool has_background;
@@ -70,7 +73,28 @@ struct ui_style {
     bool has_rotate;
     double shadow[2]; /* offset */
     double shadow_color[4];
+    double shadow_blur;
     bool has_shadow;
+};
+
+/* One shape of a canvas: a line, rectangle, circle, arc or path, filled
+ * and/or stroked. A paint the shape does not name (`fill = true`) is the
+ * node's `color`, so it follows hover and animation. */
+enum ui_shape { UI_SHAPE_LINE, UI_SHAPE_RECT, UI_SHAPE_CIRCLE, UI_SHAPE_ARC, UI_SHAPE_PATH };
+
+struct ui_shape_op {
+    enum ui_shape shape;
+    double v[6]; /* line: x1 y1 x2 y2; rect: x y w h radius; circle: cx cy r; arc: cx cy r from to */
+    struct ui_paint fill, stroke;
+    bool has_fill, has_stroke; /* a paint of its own */
+    bool fill_color, stroke_color; /* the node's colour */
+    double line_width;
+    bool round; /* round caps and joins */
+    double dash[2]; /* on, off; 0 for a solid line */
+    double opacity;
+    /* Paths: commands as numbers ('M' x y, 'L' x y, 'C' x1 y1 x2 y2 x y, 'Z'). */
+    size_t path_count;
+    double *path;
 };
 
 /* A damped spring; see anim.h. */
@@ -131,6 +155,12 @@ struct ui_node {
 
     char *icon; /* UI_NODE_ICON: a built-in icon name */
     double stroke; /* icon line width */
+
+    /* UI_NODE_CANVAS: shapes in the canvas's own coordinates, `view` units
+     * wide and high when set, else logical pixels. */
+    struct ui_shape_op *shapes;
+    size_t shape_count;
+    double view[2];
 
     char *widget; /* plugin widget type (UI_NODE_CUSTOM) */
     struct shady_shell_props_handle props;

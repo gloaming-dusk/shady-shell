@@ -42,11 +42,12 @@ shady.on("window.mapped", function(window)
         assert(focused == "shady-quick-b",
             "expected probe-b focused initially, got " .. focused)
 
-        -- Open clock/quick-settings pill and click Next window (row 1).
+        -- Open the day sheet from the clock and click Next window (row 1,
+        -- under the clock face and the day wave).
         shady.automation.move_pointer(1238, 19)
         shady.automation.click("left")
         shady.automation.after(120, function()
-            shady.automation.move_pointer(1120, 133)
+            shady.automation.move_pointer(1120, 324)
             shady.automation.click("left")
 
             shady.automation.after(160, function()
@@ -58,7 +59,7 @@ shady.on("window.mapped", function(window)
                 shady.automation.move_pointer(1238, 19)
                 shady.automation.click("left")
                 shady.automation.after(120, function()
-                    shady.automation.move_pointer(1120, 209)
+                    shady.automation.move_pointer(1120, 396)
                     shady.automation.click("left")
 
                     shady.automation.after(160, function()
@@ -71,8 +72,8 @@ shady.on("window.mapped", function(window)
                         shady.automation.click("left")
                         shady.automation.after(120, function()
                             mark("QUIT_REQUESTED=PASS")
-                            -- Row 4 is Quit with two workspaces.
-                            shady.automation.move_pointer(1120, 247)
+                            -- Quit is the last row, under a divider.
+                            shady.automation.move_pointer(1120, 443)
                             shady.automation.click("left")
                         end)
                     end)

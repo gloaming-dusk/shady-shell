@@ -19,6 +19,9 @@ nix run github:gloaming-dusk/shady-shell
 ```
 
 This runs Shady in a window with the shell's own `default.lua` and a terminal.
+That UI is Meridian: the bar stands on the line of the day, a sun crosses it,
+and the colour of the hour lights whatever is active
+([Design](docs/SHELL_DESIGN.md#the-default-ui)).
 Most people get the shell through a desktop built on it, such as
 [Gloam](https://github.com/gloaming-dusk/gloam) and its Tide desktop.
 

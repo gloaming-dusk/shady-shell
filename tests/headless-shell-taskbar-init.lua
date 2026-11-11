@@ -63,8 +63,8 @@ shady.on("window.mapped", function(window)
         assert(focused == "shady-shell-probe-b",
             "expected probe-b to be focused initially, got " .. focused)
 
-        -- A maps first, so it is the first task chip.
-        shady.automation.move_pointer(230, 19)
+        -- A maps first, so it is the first task on the bar.
+        shady.automation.move_pointer(180, 19)
         shady.automation.click("left")
 
         shady.automation.after(120, function()
@@ -72,12 +72,13 @@ shady.on("window.mapped", function(window)
                 "taskbar left click did not focus probe-a; got " .. focused)
             mark("ACTIVATE=PASS")
 
-            shady.automation.move_pointer(230, 19)
+            shady.automation.move_pointer(180, 19)
             shady.automation.click("right")
 
             shady.automation.after(120, function()
-                -- Context menu starts below the 38px bar. Row 1 is Maximize.
-                shady.automation.move_pointer(270, 93)
+                -- The menu opens under the task: rows of 34px from y = 51. Row 1
+                -- is Maximize.
+                shady.automation.move_pointer(250, 102)
                 shady.automation.click("left")
 
                 shady.automation.after(180, function()
@@ -86,11 +87,11 @@ shady.on("window.mapped", function(window)
                         "context menu maximize did not update probe-a")
                     mark("MAXIMIZE=PASS")
 
-                    shady.automation.move_pointer(230, 19)
+                    shady.automation.move_pointer(180, 19)
                     shady.automation.click("right")
                     shady.automation.after(120, function()
                         -- Row 2 toggles fullscreen.
-                        shady.automation.move_pointer(270, 127)
+                        shady.automation.move_pointer(250, 136)
                         shady.automation.click("left")
 
                         shady.automation.after(180, function()
@@ -100,21 +101,21 @@ shady.on("window.mapped", function(window)
                             mark("FULLSCREEN=PASS")
 
                             -- Open again and exit fullscreen so the bar stays fully testable.
-                            shady.automation.move_pointer(230, 19)
+                            shady.automation.move_pointer(180, 19)
                             shady.automation.click("right")
                             shady.automation.after(120, function()
-                                shady.automation.move_pointer(270, 127)
+                                shady.automation.move_pointer(250, 136)
                                 shady.automation.click("left")
                                 shady.automation.after(180, function()
                                     local a3 = find_window("shady-shell-probe-a")
                                     assert(a3 ~= nil and not a3.fullscreen,
                                         "context menu did not exit fullscreen")
 
-                                    shady.automation.move_pointer(230, 19)
+                                    shady.automation.move_pointer(180, 19)
                                     shady.automation.click("right")
                                     shady.automation.after(120, function()
                                         -- Row 4 moves the window to workspace x.
-                                        shady.automation.move_pointer(270, 195)
+                                        shady.automation.move_pointer(250, 204)
                                         shady.automation.click("left")
 
                                         shady.automation.after(180, function()
@@ -125,11 +126,11 @@ shady.on("window.mapped", function(window)
 
                                             assert(shady.workspace("x"))
                                             shady.automation.after(180, function()
-                                                shady.automation.move_pointer(230, 19)
+                                                shady.automation.move_pointer(180, 19)
                                                 shady.automation.click("right")
                                                 shady.automation.after(120, function()
                                                     -- With main and x, Close is row 5.
-                                                    shady.automation.move_pointer(270, 229)
+                                                    shady.automation.move_pointer(250, 238)
                                                     shady.automation.click("left")
 
                                                     shady.automation.after(800, function()

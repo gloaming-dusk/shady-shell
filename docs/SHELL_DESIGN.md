@@ -107,9 +107,12 @@ costs nothing noticeable. Anything that changes what a view would return
 marks the surfaces dirty.
 
 C owns layout (a small flexbox), drawing, hit-testing and hover; Lua owns
-structure, style and behaviour. Widgets are `row`, `column`, `text`, `pip`,
-`image` and `spacer`; anything richer (task chips, workspace pills, menu
-rows) is a Lua function, as `default.lua` shows. Popups are declared
+structure, style and behaviour. Widgets are `row`, `column`, `stack`,
+`text`, `icon`, `pip`, `image`, `spacer` and `canvas`; anything richer (tabs
+on the bar, menu rows, cards) is a Lua function, as `default.lua` shows. A
+`canvas` holds vector shapes as data, not as a drawing callback: views stay
+pure, the tree can still be hashed and diffed, and an idle canvas costs
+nothing. Popups are declared
 with `shell.popup{}` and opened with `shell.open(name, args)`.
 
 ## Phases
@@ -190,8 +193,28 @@ src/
   effects.h        shader effects handed from Lua to the GL renderer
   plugins.c/.h     native shell plugins: loading, values, actions, widgets
   apps.c           .desktop index for the launcher
-default.lua        the default UI
+default.lua        the default UI, Meridian
+fonts/             the typefaces it is set in (Manrope, Instrument Serif; OFL)
 ```
+
+## The default UI
+
+`default.lua` is called Meridian, and it has a subject: the day. The bar
+stands on a hairline that runs from midnight to midnight with a tick for
+each hour, and a sun crosses it. The colour of that sun is the colour of
+the hour (blue at night, rose at dawn, the theme's accent through the day,
+amber and violet at dusk), and it is the only accent the UI has: the
+focused window's tab, the selected row and the top edge of every card are
+lit by it, and nothing else is coloured. There are no boxes around things;
+what is active is lit from the line it stands on. Type carries the rest:
+Instrument Serif for what is read as a figure (the time, the launcher's
+query), Manrope for everything else, small capitals for labels.
+
+It is also the proof of what a config can do with nothing but the Lua API:
+the day line, the sun and the clock sheet's day wave are `shell.canvas`
+shapes, cards stand on blurred `shadow`s, and nothing animates or repaints
+while idle. `shell.options.light = false` keeps the theme's accent at all
+hours; `hour = 6.5` fixes the hour, for a screenshot of dawn.
 
 A surface is a `shell_surface` with a handler table. `shell_surface_redraw()`
 only marks it dirty; the loop paints dirty surfaces once per iteration and

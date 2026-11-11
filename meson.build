@@ -163,7 +163,7 @@ executable('ime-probe',
 
 # The Lua UI and its data; the C sources stay behind.
 install_data('default.lua', 'shortcut_overlay.lua', install_dir: shell_data_install_dir)
-foreach dir : ['examples', 'shaders']
+foreach dir : ['examples', 'fonts', 'shaders']
   install_subdir(dir, install_dir: shell_data_install_dir)
 endforeach
 install_data('bin/shady-brightness', install_dir: join_paths(shell_data_install_dir, 'bin'),

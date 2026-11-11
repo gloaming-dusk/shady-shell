@@ -31,6 +31,7 @@ stdenv.mkDerivation {
       ../shortcut_overlay.lua
       ../bin
       ../examples
+      ../fonts
       ../include
       ../plugins
       ../protocol
