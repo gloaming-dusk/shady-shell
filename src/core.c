@@ -521,6 +521,7 @@ static void paint(struct shell_surface *surface) {
     }
     cairo_surface_t *image = core->renderer->impl->begin(core->renderer, surface, width, height);
     if (!image) return;
+    surface->composited_ms = now_ms();
     cairo_t *cr = cairo_create(image);
     cairo_scale(cr, surface->scale, surface->scale);
     double area = 1.0;
@@ -574,6 +575,7 @@ static void paint(struct shell_surface *surface) {
  * running the owner's draw(), once per frame. */
 static void composite(struct shell_surface *surface) {
     struct shell_core *core = surface->core;
+    surface->composited_ms = now_ms();
     surface->frame = wl_surface_frame(surface->wl_surface);
     wl_callback_add_listener(surface->frame, &frame_listener, surface);
     if (!core->renderer->impl->composite(core->renderer, surface)) {
@@ -616,6 +618,12 @@ static void paint_stats(struct shell_core *core, struct shell_surface *painted, 
     }
 }
 
+/* With a shader_fps cap, when an animated surface may composite next. */
+static uint64_t composite_due(const struct shell_surface *surface) {
+    unsigned fps = surface->core->shader_fps;
+    return fps ? surface->composited_ms + 1000u / fps : 0;
+}
+
 static void paint_dirty(struct shell_core *core) {
     struct shell_surface *surface;
     paint_stats(core, NULL, false);
@@ -628,7 +636,8 @@ static void paint_dirty(struct shell_core *core) {
             surface->animating = false;
             paint(surface);
             surface->repaint_only = false;
-        } else if (surface->animated && core->renderer->impl->composite) {
+        } else if (surface->animated && core->renderer->impl->composite &&
+                composite_due(surface) <= now_ms()) {
             composite(surface);
         }
     }
@@ -1006,6 +1015,12 @@ bool shell_core_init(struct shell_core *core,
     wl_list_init(&core->watches);
     core->listener = listener;
     core->listener_data = data;
+    const char *fps = getenv("SHADY_SHELL_SHADER_FPS");
+    if (fps && *fps) {
+        long n = strtol(fps, NULL, 10);
+        core->shader_fps_default = n > 0 && n <= 1000 ? (unsigned)n : 0;
+    }
+    core->shader_fps = core->shader_fps_default;
     core->xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
     if (!core->xkb_context) return false;
 
@@ -1084,12 +1099,19 @@ static void reap_watches(struct shell_core *core) {
 }
 
 static int next_timeout(struct shell_core *core) {
-    if (wl_list_empty(&core->timers)) return -1;
     uint64_t now = now_ms();
     uint64_t soonest = UINT64_MAX;
     struct shell_timer *timer;
     wl_list_for_each(timer, &core->timers, link)
         if (timer->due_ms < soonest) soonest = timer->due_ms;
+    /* Animated surfaces held back by shader_fps wake the loop when due. */
+    struct shell_surface *surface;
+    if (core->shader_fps && core->renderer && core->renderer->impl->composite)
+        wl_list_for_each(surface, &core->surfaces, link)
+            if (surface->configured && !surface->frame && surface->animated &&
+                    composite_due(surface) < soonest)
+                soonest = composite_due(surface);
+    if (soonest == UINT64_MAX) return -1;
     if (soonest <= now) return 0;
     uint64_t wait = soonest - now;
     return wait > 60000 ? 60000 : (int)wait;

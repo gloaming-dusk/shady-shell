@@ -1568,6 +1568,18 @@ static void date_tick(void *data) {
 /* shell.date(format): strftime of the local time. Views that use it are
  * repainted when the formatted value can next change (each second if the
  * format shows seconds, else each minute). */
+/* shell.shader_fps([n]): the most composites a second for animated shaders
+ * (0: every frame). Returns the cap in force. */
+static int l_shader_fps(lua_State *L) {
+    struct shell_core *core = &lua_of(L)->shell->core;
+    if (!lua_isnoneornil(L, 1)) {
+        lua_Integer n = luaL_checkinteger(L, 1);
+        core->shader_fps = n > 0 ? (unsigned)(n > 1000 ? 1000 : n) : 0;
+    }
+    lua_pushinteger(L, core->shader_fps);
+    return 1;
+}
+
 static int l_date(lua_State *L) {
     struct shell_lua *lua = lua_of(L);
     const char *format = luaL_optstring(L, 1, "%H:%M");
@@ -2430,6 +2442,7 @@ static const luaL_Reg api[] = {
     { "listen", l_listen },
     { "date", l_date },
     { "shader", l_shader },
+    { "shader_fps", l_shader_fps },
     { "plugin", l_plugin },
     { "value", l_value },
     { "compositor_value", l_compositor_value },
@@ -2519,6 +2532,8 @@ static struct shell_lua *generation_load(struct shell *shell, const char *path) 
         lua_rawseti(L, -2, (lua_Integer)(f - shell_image_formats()) + 1);
     }
     lua_setfield(L, -2, "image_formats");
+    /* A config that is loaded again starts from the default cap. */
+    shell->core.shader_fps = shell->core.shader_fps_default;
     /* "gl" or "shm": whether shader effects are drawn. */
     if (shell->core.renderer) lua_pushstring(L, shell->core.renderer->impl->name);
     else lua_pushnil(L);

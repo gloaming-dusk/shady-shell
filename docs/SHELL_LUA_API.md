@@ -650,6 +650,13 @@ is animated: the shell composites it every frame from the last drawing,
 without running any view, so an animated bar costs GPU time but almost no
 CPU. Shader files are watched with the config, and saving one reloads it.
 
+Every one of those frames also makes the compositor draw the screen again,
+which on a laptop keeps the GPU awake. `shell.shader_fps(n)` composites
+animated shaders at most `n` times a second (`0`, the default, is every
+frame) and returns the cap; called without an argument it only returns it.
+`SHADY_SHELL_SHADER_FPS` sets the default, which a reloaded config starts
+from. A slow drift (clouds, an aurora) looks the same at 10–20.
+
 ## Compositor values
 
 `shell.compositor_value(key[, fallback])` returns a value the compositor

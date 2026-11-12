@@ -87,6 +87,11 @@ struct shell_core {
     const struct shell_core_listener *listener;
     void *listener_data;
     bool running;
+
+    /* At most this many composites a second for animated shaders (u_time);
+     * 0 is every frame. SHADY_SHELL_SHADER_FPS sets the default, which a
+     * config may change with shell.shader_fps(). */
+    unsigned shader_fps, shader_fps_default;
 };
 
 /* ---- core ------------------------------------------------------------- */
@@ -200,6 +205,7 @@ struct shell_surface {
     void *render_data; /* owned by the renderer */
     struct shell_effects effects; /* filled by the owner on each paint */
     bool animated; /* set by the renderer: an effect uses u_time */
+    uint64_t composited_ms; /* when it was last composited, for shader_fps */
     /* Set by the owner: repaint on the next frame even if nothing changed.
      * Such a repaint has `repaint_only` set during draw(). */
     bool animating;
