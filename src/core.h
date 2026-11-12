@@ -168,6 +168,8 @@ struct shell_surface_handler {
     /* `utf8` is the text the key produces, "" for none. */
     void (*key)(void *data, struct shell_surface *surface, xkb_keysym_t sym,
         const char *utf8);
+    /* Optional: the surface had the keyboard and lost it. */
+    void (*keyboard_leave)(void *data, struct shell_surface *surface);
     /* An input method committed `commit` (NULL for none) and now composes
      * `preedit` ("" for nothing). */
     void (*text)(void *data, struct shell_surface *surface, const char *commit,

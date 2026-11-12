@@ -47,6 +47,7 @@ run() {
         fail "timed out waiting for $1x '$2'"
     }
     export XDG_RUNTIME_DIR="$tmp/runtime" WAYLAND_DISPLAY=wayland-0
+    unset SHADY_SOCKET WAYLAND_SOCKET
 
     wait_for 1 "shady-shell: renderer $renderer"
     wait_for 1 "shady-shell: shady-shell on HEADLESS-1"
@@ -70,7 +71,7 @@ run() {
     wlr-randr --output HEADLESS-2 --on
     wait_for 2 "shady-shell: shady-shell on HEADLESS-2"
 
-    "$BUILD_DIR/shadyctl" quit >/dev/null
+    "$BUILD_DIR/shadyctl" -s "$tmp/runtime/shady-wayland-0.sock" quit >/dev/null
     wait "$comp" || fail "compositor exited with an error"
     grep -q "shell-outputs: timed out" "$log" && fail "timed out"
     grep -Eq 'AddressSanitizer|runtime error:|UndefinedBehaviorSanitizer|shady-shell: .*failed' "$log" &&

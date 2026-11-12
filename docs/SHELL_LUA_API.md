@@ -87,6 +87,7 @@ shell.popup {
     margin = { top = 42, right = 8 },
     width = 250,                  -- omit width/height to fit the content
     keyboard = "none",            -- none | exclusive | on_demand
+    close_on_blur = false,        -- close when it loses the keyboard
     persistent = false,           -- keep it open, like a bar
     outputs = nil,                -- "all": persistent on every output, one each
     fill = false,                 -- cover the whole output (anchors and size ignored)
@@ -98,6 +99,11 @@ shell.popup {
     on_key = function(key, text, args) ... end,
 }
 ```
+
+With `close_on_blur = true` (and a `keyboard` mode that takes the keyboard)
+the popup closes when the keyboard moves elsewhere: a click on a window, or
+another popup opening. Clicks on the desktop or on a bar, which take no
+keyboard, leave it open.
 
 With `text_input = true` (and a `keyboard` mode) the popup takes text from
 the input method, through text-input-v3: what is still being composed is

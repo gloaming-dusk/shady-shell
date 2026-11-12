@@ -7,6 +7,9 @@
  * With IME_PROBE_GRAB=1 it instead grabs the keyboard while active, as fcitx5
  * does, reports the keys it is given and gives them back through a virtual
  * keyboard of its own, as fcitx5 does with the ones it does not use.
+ *
+ * With IME_PROBE_KEYBOARD=1 it is only a keyboard: a virtual one, with a
+ * keymap, kept while it runs, so a headless seat has keyboard focus.
  */
 #define _POSIX_C_SOURCE 200809L
 
@@ -148,6 +151,37 @@ int main(void) {
     if (!seat || !manager) {
         fprintf(stderr, "ime-probe: no seat or input method manager\n");
         return 1;
+    }
+    if (getenv("IME_PROBE_KEYBOARD")) {
+        if (!virtual_keyboard_manager) {
+            fprintf(stderr, "ime-probe: no virtual keyboard manager\n");
+            return 1;
+        }
+        static const char keymap[] =
+            "xkb_keymap {\n"
+            "  xkb_keycodes \"probe\" { minimum = 8; maximum = 255; <ESC> = 9; };\n"
+            "  xkb_types \"probe\" { };\n"
+            "  xkb_compat \"probe\" { };\n"
+            "  xkb_symbols \"probe\" { key <ESC> { [ Escape ] }; };\n"
+            "};\n";
+        FILE *file = tmpfile();
+        if (!file || fwrite(keymap, 1, sizeof(keymap), file) != sizeof(keymap) || fflush(file)) {
+            fprintf(stderr, "ime-probe: cannot write a keymap\n");
+            return 1;
+        }
+        int fd = dup(fileno(file));
+        fclose(file);
+        virtual_keyboard = zwp_virtual_keyboard_manager_v1_create_virtual_keyboard(
+            virtual_keyboard_manager, seat);
+        zwp_virtual_keyboard_v1_keymap(virtual_keyboard, WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1,
+            fd, sizeof(keymap));
+        close(fd);
+        wl_display_roundtrip(display);
+        printf("ime: keyboard\n");
+        fflush(stdout);
+        while (wl_display_dispatch(display) >= 0) {}
+        wl_display_disconnect(display);
+        return 0;
     }
     input_method = zwp_input_method_manager_v2_get_input_method(manager, seat);
     zwp_input_method_v2_add_listener(input_method, &input_method_listener, NULL);

@@ -9,6 +9,9 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+# Run from inside a session, these name its compositor: a test's shadyctl or
+# client would reach it (and `shadyctl quit` would end the session).
+unset SHADY_SOCKET WAYLAND_DISPLAY WAYLAND_SOCKET
 BUILD_DIR="${SHADY_SHELL_BUILD_DIR:-build}"
 [[ -d "$BUILD_DIR" ]] || meson setup "$BUILD_DIR" >/dev/null
 ninja -C "$BUILD_DIR" >/dev/null

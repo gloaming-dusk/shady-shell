@@ -67,6 +67,7 @@ struct view_def {
     bool input_widgets; /* take the pointer only over interactive widgets */
     bool text_input; /* take text from input methods (text-input-v3) */
     bool lock; /* a lock surface on every output while the session is locked */
+    bool close_on_blur; /* close the popup when it loses the keyboard */
     /* shell.window: an ordinary application window. */
     bool window;
     char title[NAME_MAX_LEN], app_id[NAME_MAX_LEN];
@@ -786,6 +787,18 @@ static void view_closed(void *data, struct shell_surface *surface) {
     if (host.app && wl_list_empty(&lua->views)) shell_core_stop(&lua->shell->core);
 }
 
+/* A popup with close_on_blur goes when the keyboard moves elsewhere: a click
+ * on a window, or another popup taking it. Its own closing (which gives up
+ * the keyboard first) and clicks on surfaces without a keyboard leave it. */
+static void view_keyboard_leave(void *data, struct shell_surface *surface) {
+    (void)surface;
+    struct view *view = data;
+    if (!view->def->close_on_blur || view->closing) return;
+    struct shell_lua *lua = view->lua;
+    close_view(view);
+    redraw_all(lua);
+}
+
 static const struct shell_surface_handler view_handler = {
     .draw = view_draw,
     .prepare = view_prepare,
@@ -797,6 +810,7 @@ static const struct shell_surface_handler view_handler = {
     .pointer_scroll = view_scroll,
     .key = view_key,
     .text = view_text,
+    .keyboard_leave = view_keyboard_leave,
 };
 
 static struct view *view_create(struct shell_lua *lua, struct view_def *def,
@@ -1063,7 +1077,7 @@ static int l_bar(lua_State *L) {
 
 /* shell.popup{name=, view=, on_key=, layer="overlay", anchor={...},
  *             margin={...}, width=, height=, keyboard="none"|"exclusive"|"on_demand",
- *             persistent=false} */
+ *             persistent=false, close_on_blur=false} */
 static int l_popup(lua_State *L) {
     struct view_def *def = new_def(L, true);
     def->layer = parse_layer(L, 1, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY);
@@ -1106,6 +1120,9 @@ static int l_popup(lua_State *L) {
     lua_pop(L, 1);
     lua_getfield(L, 1, "lock");
     def->lock = lua_toboolean(L, -1);
+    lua_pop(L, 1);
+    lua_getfield(L, 1, "close_on_blur");
+    def->close_on_blur = lua_toboolean(L, -1);
     lua_pop(L, 1);
     if (def->lock) def->persistent = def->every_output = false;
     lua_getfield(L, 1, "input");

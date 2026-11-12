@@ -757,7 +757,10 @@ static void keyboard_leave(void *data, struct wl_keyboard *keyboard, uint32_t se
         struct wl_surface *wl_surface) {
     (void)keyboard; (void)serial; (void)wl_surface;
     struct shell_core *core = data;
+    struct shell_surface *left = core->keyboard_focus;
     core->keyboard_focus = NULL;
+    /* Last: the handler may destroy the surface. */
+    if (left && left->handler->keyboard_leave) left->handler->keyboard_leave(left->data, left);
 }
 
 static void keyboard_key(void *data, struct wl_keyboard *keyboard, uint32_t serial,

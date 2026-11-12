@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `shell.popup{close_on_blur = true}` closes the popup when it loses the
+  keyboard: a click on a window, or another popup opening.
+- `tests/run.sh` no longer reaches the session it is run from: the
+  outputs test's `shadyctl quit` followed `$SHADY_SOCKET` and ended it.
 - shady-shell has its own repository, moved out of
   [Shady](https://github.com/gloaming-dusk/shady) with its history. It builds
   without the compositor: the `shady-shell-v1` protocol and the shell plugin
