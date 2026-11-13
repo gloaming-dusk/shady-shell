@@ -590,6 +590,26 @@ UI, Horizon and Objects each install it with their own
 look ([`shell/shortcut_overlay.lua`](../shortcut_overlay.lua)). A
 config can also draw its own from `shell.shortcuts()`.
 
+## Modules without a look
+
+Besides `wallpaper` and `shortcut_overlay`, the data directory has modules
+that do the work behind a desktop's parts and leave the drawing to the
+rice. Meridian (`default.lua`) and Tide are both built on them; each file
+documents its functions at the top.
+
+| Module | |
+|---|---|
+| `require("machine")` | the machine's state, read in views with `shell.poll`: `volume()`, `mic_muted()`, `brightness()`, `battery()`, `battery_time()`, `wifi()`, `bluetooth()`, `profile()`, `media()`, `cpu()`, `memory()`, `disk()`, `uptime()`; and `machine.act` to drive it: `volume(v)`, `mute()`, `brightness(v)`, `wifi()`, `bluetooth()`, `profile()`, `media(what)`, `suspend()`, `reboot()`, `poweroff()`. A missing tool reads as nil. A value the shell just set wins over the poll for a few seconds. `has(command)`, `have.<tool>` |
+| `require("lockscreen").install{view=, ...}` | the lock screen's typing, the PAM check, a fingerprint reader listening alongside, and taking an abandoned lock over; `view(ctx, state)` draws it from `state.length`, `busy`, `message`, `error`, `attempts`. Returns `lock()` and `available()`; `before_lock` and `fallback` hook in |
+| `require("toasts")` | which notifications to show (`shown(limit)`), do-not-disturb kept across restarts and shared by rices (`dnd()`, `set_dnd(on)`), what a click does (`activate(n)`), `today()`, and `follow{popup=, hold=}` to keep a popup open exactly while there is something to show |
+| `require("commands").listen(key, handlers)` | words published by the compositor (`shady.publish(key, "lock " .. serial)`) back into calls, ignoring the value replayed when the shell connects |
+| `require("focus_timer")` | a span of time from now, kept across restarts, with a notification at its end: `start(minutes)`, `stop()`, `running()`, `left()`, `span()` |
+| `require("almanac")` | dates and the sky: `month(year, month)` as weeks, `shift`, `month_name`, `moon_phase`, `moon_lit`, `moon_name`, `moon_path` (for `shell.canvas`), `year_day`, `week` |
+| `require("statefile")(name)` | a few `key=value`s that outlive the shell, in `$XDG_STATE_HOME/shady/<name>`: `get(key)`, `set(key, value)` |
+
+With `SHADY_SHELL_OFFLINE=1` (the headless tests) `machine` reads nothing
+and runs nothing: every source is nil and every action only logs.
+
 ## Shader effects
 
 With the GL renderer (the default), any bar, popup or widget can be drawn

@@ -194,6 +194,12 @@ src/
   plugins.c/.h     native shell plugins: loading, values, actions, widgets
   apps.c           .desktop index for the launcher
 default.lua        the default UI, Meridian
+meridian/          how its parts look: the vocabulary (kit), the machine sheet,
+                   the calendar and almanac, the lock screen
+machine.lua, lockscreen.lua, toasts.lua, commands.lua, focus_timer.lua,
+almanac.lua, statefile.lua
+                   what a desktop's parts do, without a look; Meridian and
+                   Tide are built on them
 fonts/             the typefaces it is set in (Manrope, Instrument Serif; OFL)
 ```
 
@@ -215,6 +221,41 @@ the day line, the sun and the clock sheet's day wave are `shell.canvas`
 shapes, cards stand on blurred `shadow`s, and nothing animates or repaints
 while idle. `shell.options.light = false` keeps the theme's accent at all
 hours; `hour = 6.5` fixes the hour, for a screenshot of dawn.
+
+Everything else it has keeps to that idea, and lives in `meridian/`:
+
+- **The day sheet** (the clock) holds the day as a wave, the month (today
+  rises in the light; scroll or ‹ › to turn it) and today's notifications,
+  each also pinned on the wave at the hour it came.
+- **The instruments** on the bar (Wi-Fi, Bluetooth, sound, and the charge
+  as a dial with its figure) open **the machine sheet**: the charge set
+  large, the processor, memory and disk as dials, sound and screen light as
+  lines of light to drag or scroll, the radios, do-not-disturb (only
+  critical notifications come up), the music that is playing, a focus
+  span, and the session. Log out, Restart and Power off ask once
+  ("Sure?") before they run.
+- **Now playing** sits on the bar while a player has something: three bars
+  that stand up while it plays, and the title. A click plays or pauses.
+- **Focus** marks a span of the day line from now to its end (15, 25 or 50
+  minutes); the sun walks along it, and the shell says when it is over.
+- **The lock screen** runs the day line across the screen as a horizon,
+  the sun standing on it, the time large above it; the password is typed
+  onto a line as points of light. A fingerprint reader listens too when
+  the `shady-lock-fingerprint` PAM service exists.
+- **The almanac** stands on the desktop's lower left corner: the date, the
+  week, the moon as it is tonight, and the year as a line lit up to today.
+  `shell.options.desk = false` leaves it out.
+
+None of this is Meridian's own machinery: reading the machine, the lock's
+PAM check, do-not-disturb, the focus timer, the calendar's arithmetic and
+the words from the compositor are shady-shell's modules without a look
+([SHELL_LUA_API.md](SHELL_LUA_API.md#modules-without-a-look)), which Tide
+uses too; `meridian/` only draws. A desktop built on the shell should not
+have to copy another one's code to get these. With no compositor side of its own,
+Meridian takes keys as the published value `meridian.do` (`lock`,
+`controls`, `day`, `launcher`, `dnd`, `focus [minutes]`); `default.lua`
+shows the binding. `SHADY_SHELL_OFFLINE=1` (the headless tests) reads and
+runs nothing of the machine.
 
 A surface is a `shell_surface` with a handler table. `shell_surface_redraw()`
 only marks it dirty; the loop paints dirty surfaces once per iteration and

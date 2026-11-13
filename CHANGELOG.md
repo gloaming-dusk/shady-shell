@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- Modules without a look, for rices to build their parts on (see
+  [Modules without a look](docs/SHELL_LUA_API.md#modules-without-a-look)):
+  `machine` (sound, light, power, radios, music, load, the session),
+  `lockscreen` (typing, PAM, fingerprint, taking a lock over), `toasts`
+  (which to show, do-not-disturb, the popup), `commands` (words published
+  by the compositor), `focus_timer`, `almanac` (calendar, moon, year) and
+  `statefile`. With `SHADY_SHELL_OFFLINE=1`, as in the headless tests,
+  `machine` reads and runs nothing.
+- Meridian is built on them and grows the rest of a desktop in its own
+  terms, its look in `meridian/`: instruments on the bar opening a machine
+  sheet (charge, CPU/memory/disk dials, sound and screen light as lines of
+  light, Wi-Fi, Bluetooth, do-not-disturb, the playing music, a focus
+  timer, and Lock, Sleep, Log out, Restart, Power off, the last three
+  asking first); now playing on the bar; the focus span drawn on the day
+  line; a month and today's notifications (pinned on the day wave) in the
+  day sheet, which no longer lists the launcher, Next window and
+  workspaces; a lock screen with the day as its horizon; an almanac on the
+  desktop (`shell.options.desk = false` removes it). Keys reach it as the
+  published value `meridian.do`.
 - `shell.popup{close_on_blur = true}` closes the popup when it loses the
   keyboard: a click on a window, or another popup opening.
 - `tests/run.sh` no longer reaches the session it is run from: the

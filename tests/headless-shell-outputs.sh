@@ -20,6 +20,8 @@ run() {
     local log="$tmp/log"
     (
         export XDG_RUNTIME_DIR="$tmp/runtime"
+        # The default UI reads and runs nothing of the machine, and keeps its state here.
+        export SHADY_SHELL_OFFLINE=1 XDG_STATE_HOME="$XDG_RUNTIME_DIR/state"
         unset WAYLAND_DISPLAY WAYLAND_SOCKET SHADY_SOCKET
         export WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=2 WLR_RENDERER=pixman
         export SHADY_LUA_INIT="$ROOT/tests/headless-shell-outputs-init.lua"
@@ -47,6 +49,8 @@ run() {
         fail "timed out waiting for $1x '$2'"
     }
     export XDG_RUNTIME_DIR="$tmp/runtime" WAYLAND_DISPLAY=wayland-0
+    # The default UI reads and runs nothing of the machine, and keeps its state here.
+    export SHADY_SHELL_OFFLINE=1 XDG_STATE_HOME="$XDG_RUNTIME_DIR/state"
     unset SHADY_SOCKET WAYLAND_SOCKET
 
     wait_for 1 "shady-shell: renderer $renderer"

@@ -32,9 +32,17 @@ stdenv.mkDerivation {
       ../default.lua
       ../shortcut_overlay.lua
       ../wallpaper.lua
+      ../almanac.lua
+      ../commands.lua
+      ../focus_timer.lua
+      ../lockscreen.lua
+      ../machine.lua
+      ../statefile.lua
+      ../toasts.lua
       ../bin
       ../examples
       ../fonts
+      ../meridian
       ../include
       ../plugins
       ../protocol

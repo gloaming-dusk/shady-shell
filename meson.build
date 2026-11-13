@@ -169,8 +169,12 @@ executable('ime-probe',
   install: false)
 
 # The Lua UI and its data; the C sources stay behind.
-install_data('default.lua', 'shortcut_overlay.lua', 'wallpaper.lua', install_dir: shell_data_install_dir)
-foreach dir : ['examples', 'fonts', 'shaders']
+# The modules a config builds on (no look of their own), and the default UI.
+install_data('default.lua', 'shortcut_overlay.lua', 'wallpaper.lua',
+  'almanac.lua', 'commands.lua', 'focus_timer.lua', 'lockscreen.lua', 'machine.lua',
+  'statefile.lua', 'toasts.lua',
+  install_dir: shell_data_install_dir)
+foreach dir : ['examples', 'fonts', 'meridian', 'shaders']
   install_subdir(dir, install_dir: shell_data_install_dir)
 endforeach
 install_data('bin/shady-brightness', install_dir: join_paths(shell_data_install_dir, 'bin'),
