@@ -13,17 +13,13 @@
 
 -- Options a config can set before dofile()-ing this file; see
 -- examples/aurora.lua.
+--   desk           false: no almanac (date, moon, year line) on the desktop
 --   light          false: always the theme's accent, whatever the hour
 --   hour           a fixed hour (0..24) for the light, e.g. 6.5 for dawn
 --   bar_opacity, panel_opacity, bar_shader, bar_uniforms, focus_shader,
 --   focus_uniforms, bar_extra
 --   wallpaper      a picture, a folder of them or "#rrggbb" (see wallpaper.lua)
 local options = shell.options or {}
-local t = shell.theme
-local WHITE, BLACK = "#ffffff", "#000000"
-local BAR = 38
-local a, mix = shell.alpha, shell.mix
-
 shell.fonts(shell.data_dir .. "/fonts")
 
 -- Meridian has no wallpaper of its own: the compositor's background is the
@@ -31,140 +27,25 @@ shell.fonts(shell.data_dir .. "/fonts")
 -- (or .png, .webp; a folder ~/.config/shady/wallpapers is a slideshow) or
 -- chosen with `shady-wallpaper set` goes under the bar instead.
 require("wallpaper").install { source = options.wallpaper }
-local function sans(weight, size) return "Manrope " .. weight .. " " .. size end
-local function serif(size, italic) return "Instrument Serif " .. (italic and "Italic " or "") .. size end
 
--- Small capitals with air between them: labels, dates, hints.
-local function caps(text, props)
-    props = props or {}
-    props.font = props.font or sans("Bold", 7.5)
-    props.letter_spacing = props.letter_spacing or 1.5
-    props.color = props.color or a(t.text_dim, 0.85)
-    return shell.text(text:upper(), props)
-end
+-- What it is built on: shady-shell's modules, which have no look (the
+-- machine's state, toasts and do-not-disturb, the focus timer, words from
+-- the compositor). What it looks like lives in meridian/: the vocabulary
+-- (the light, small capitals, cards, rows, instruments) and its sheets.
+local S = require("machine")
+local F = require("focus_timer")
+local toasts = require("toasts")
+local K = require("meridian.kit")
+local calendar = require("meridian.calendar")
+local controls = require("meridian.controls")
+local lock = require("meridian.lock")
 
--- ---- the light ---------------------------------------------------------
-
--- The hour of the day as a number, 23.5 at half past eleven at night.
--- Reading the clock here makes every view that asks repaint each minute.
-local function hour()
-    if options.hour then return options.hour % 24 end
-    return tonumber(shell.date("%H")) + tonumber(shell.date("%M")) / 60
-end
-
-local NIGHT = mix(t.accent_2, WHITE, 0.38)
-local SKY = {
-    { 0, NIGHT }, { 4.5, NIGHT }, { 6.5, "#FF9A7B" }, { 8, "#FFD49A" },
-    { 10, t.accent }, { 15.5, t.accent }, { 17.5, "#FFC46B" }, { 19, "#FF7F6E" },
-    { 20.5, "#B892FF" }, { 22.5, NIGHT }, { 24, NIGHT },
-}
-
--- The colour of the light at this hour.
-local function light()
-    if options.light == false then return t.accent end
-    local h = hour()
-    for i = 2, #SKY do
-        local from, to = SKY[i - 1], SKY[i]
-        if h <= to[1] then return mix(from[2], to[2], (h - from[1]) / (to[1] - from[1])) end
-    end
-    return NIGHT
-end
-
--- Light rising from the line a widget stands on: a low dome, brightest
--- where it touches the line. It fades in and out with its `opacity`.
-local function rise(color, strength)
-    return shell.canvas {
-        left = 0, right = 0, top = 0, bottom = 0, view = { 100, 50 },
-        animate = "smooth", opacity = strength,
-        { "circle", 50, 50, 50, fill = shell.gradient("radial", a(color, 0.42), a(color, 0.12), a(color, 0)) },
-    }
-end
-
--- The mark of the chosen row: a short line of light at its left edge.
-local function edge(color, strength, inset)
-    return shell.box { left = 0, top = inset, bottom = inset, width = 2, animate = "snappy",
-        background = shell.gradient("vertical", a(color, 0), a(color, strength), a(color, strength), a(color, 0)) }
-end
-
--- Light falling in from the left edge of a row.
-local function wash(color, strength)
-    return shell.gradient("horizontal", a(color, 0.2 * strength), a(color, 0.05 * strength), a(color, 0))
-end
-
--- The mark: a disc, half of it in the light.
-local function mark(L, size)
-    return shell.canvas {
-        width = size, height = size, view = { 20, 20 },
-        { "arc", 10, 10, 7.5, 180, 360, fill = L },
-        { "circle", 10, 10, 7.5, stroke = a(t.text, 0.85), width = 1.4 },
-    }
-end
-
--- ---- cards -------------------------------------------------------------
-
--- Popups grow out of a slightly smaller, lifted, transparent card and go
--- back into it when they close.
-local POP = { opacity = 0, scale = 0.96, translate = { 0, -6 } }
--- Room around a card for its shadow; less towards a screen edge it hugs.
-local SHADE = 40
-
--- The card every popup is: dark, borderless but for a hairline, lit along
--- its top edge and standing off the desktop on a soft shadow. `room` is the
--- space kept around it, {top, right, bottom, left}.
-local function panel(radius, room, props)
-    local L = props.light or light()
-    props.light = nil
-    local alpha = options.panel_opacity or 0.97
-    local id = props.id or "card"
-    props.id = nil
-    props.align = props.align or "stretch"
-    local card = shell.stack {
-        id = id, radius = radius,
-        animate = "snappy", enter = POP, exit = POP,
-        background = shell.gradient("vertical", a(mix(t.surface, WHITE, 0.055), alpha), a(t.surface, alpha)),
-        border = a(t.text, 0.075),
-        shadow = { 0, 18, a(BLACK, 0.6), 26 },
-        -- The light of the hour, falling over the top edge.
-        shell.box { top = 0, left = 0, right = 0, height = 120, radius = radius,
-            background = shell.gradient("vertical", a(L, 0.085), a(L, 0.015), a(L, 0)) },
-        shell.row { top = 0, left = radius, right = radius, height = 1,
-            shell.spacer { height = 1, background = shell.gradient("horizontal",
-                a(L, 0), a(L, 0.75), a(L, 0)) } },
-        shell.column(props),
-    }
-    return shell.column { padding = room, align = "stretch", card }
-end
-
--- A menu row: lit from the left when hovered, optional pip, danger colouring.
-local function menu_row(ctx, id, height, label, opts)
-    opts = opts or {}
-    local L = opts.danger and t.danger or opts.light
-    local hovered = ctx.hovered == id
-    local strong = hovered or opts.strong
-    return shell.stack {
-        id = id, height = height, on_click = opts.on_click,
-        shell.box { left = 0, right = 0, top = 2, bottom = 2, animate = "snappy",
-            background = hovered and wash(L, 1) or wash(L, 0) },
-        edge(L, hovered and 1 or 0, 6),
-        shell.row {
-            left = 0, right = 0, top = 0, bottom = 0, padding = { 0, 18 }, gap = 9,
-            shell.text(label, {
-                animate = "snappy",
-                font = sans(strong and "Bold" or "Medium", 9.5),
-                color = opts.danger and a(t.danger, hovered and 1 or 0.85)
-                    or a(t.text, strong and 1 or 0.72),
-            }),
-            shell.spacer(),
-            opts.pip and shell.pip { radius = 2.6, lit = true, color = L } or false,
-            opts.hint and caps(opts.hint, { color = a(t.text_dim, 0.55) }) or false,
-        },
-    }
-end
-
-local function divider(inset)
-    return shell.row { height = 1, padding = { 0, inset or 18 },
-        shell.spacer { height = 1, background = a(t.text, 0.07) } }
-end
+local t = K.theme
+local WHITE, BLACK, BAR = K.WHITE, K.BLACK, K.BAR
+local a, mix = K.a, K.mix
+local sans, serif, caps = K.sans, K.serif, K.caps
+local hour, light, rise, edge, wash, mark = K.hour, K.light, K.rise, K.edge, K.wash, K.mark
+local SHADE, panel, menu_row, divider = K.SHADE, K.panel, K.menu_row, K.divider
 
 -- ---- launcher ----------------------------------------------------------
 
@@ -302,25 +183,41 @@ shell.popup {
     end,
 }
 
--- ---- the day sheet (quick settings) ------------------------------------
+-- ---- the sheets ----------------------------------------------------------
 
-local quick_output
-local QUICK = 280
+-- The day sheet hangs from the clock, the machine sheet from the
+-- instruments; one closes the other.
+local quick_output, controls_output
+local QUICK = 300
 
 local function toggle_quick(output)
     shell.close("menu")
+    shell.close("controls")
     if shell.is_open("quick") then
         shell.close("quick")
     else
         quick_output = output
+        calendar.reset()
         shell.open("quick", { output = output })
+    end
+end
+
+local function toggle_controls(output)
+    shell.close("menu")
+    shell.close("quick")
+    if shell.is_open("controls") then
+        shell.close("controls")
+    else
+        controls_output = output
+        shell.open("controls", { output = output })
     end
 end
 
 -- The day as a wave: midnight in the troughs at both ends, noon on the
 -- crest, the horizon through the middle. What has passed is drawn in the
 -- light; the sun (a ring, once it is under the horizon) rides the curve.
-local function day_wave(L, width, height)
+-- `marks` are hours to pin on the curve: when today's notifications came.
+local function day_wave(L, width, height, marks)
     local h = hour()
     local horizon, swing = height * 0.5, height * 0.5 - 9
     local inset = 6 -- room for the sun at midnight, at either end
@@ -339,6 +236,12 @@ local function day_wave(L, width, height)
     local x, y = at(h)
     local up = y < horizon
     local x6, x18 = at(6), at(18)
+    local pins = {}
+    for _, m in ipairs(marks or {}) do
+        local mx, my = at(m)
+        pins[#pins + 1] = { "line", mx, my - 4, mx, my - 9, stroke = a(t.text, 0.45) }
+        pins[#pins + 1] = { "circle", mx, my - 10.5, 1.5, fill = a(t.text, 0.7) }
+    end
     return shell.canvas {
         width = width, height = height,
         -- Daylight, between where the curve leaves the horizon and returns.
@@ -348,9 +251,33 @@ local function day_wave(L, width, height)
         { "line", x18, horizon - 3, x18, horizon + 3, stroke = a(t.text, 0.3) },
         { "path", curve(0, 24), stroke = a(t.text, 0.16), width = 1.2, dash = { 1.5, 3.5 }, cap = "round" },
         { "path", curve(0, h), stroke = shell.gradient("horizontal", a(L, 0.1), L), width = 1.6, cap = "round" },
+        pins,
         { "circle", x, y, 15, fill = shell.gradient("radial", a(L, up and 0.55 or 0.3), a(L, 0.1), a(L, 0)) },
         up and { "circle", x, y, 3.2, fill = mix(L, WHITE, 0.75) }
             or { "circle", x, y, 3.4, fill = t.surface, stroke = L, width = 1.5 },
+    }
+end
+
+-- One notification of the day: when it came, from what, and what it said.
+local function entry(ctx, n, L)
+    local id = "day:n:" .. n.id
+    local hovered = ctx.hovered == id
+    return shell.stack {
+        id = id, height = 40,
+        on_click = function() shell.close("quick") end,
+        shell.box { left = 0, right = 0, top = 1, bottom = 1, animate = "snappy",
+            background = wash(n.urgency == "critical" and t.danger or L, hovered and 0.8 or 0) },
+        shell.row {
+            left = 0, right = 0, top = 0, bottom = 0, padding = { 0, 18 }, gap = 12,
+            shell.text(os.date("%H:%M", n.time), { width = 34, font = serif(14), letter_spacing = 0,
+                color = n.active and L or a(t.text_dim, 0.8) }),
+            shell.column { grow = 1, shrink = 1, align = "start", gap = 2,
+                caps(n.app ~= "" and n.app or "Notification", { font = sans("Bold", 6.5),
+                    color = a(t.text_dim, 0.6) }),
+                shell.text(n.summary ~= "" and n.summary or n.body, { font = sans("Medium", 9),
+                    color = a(t.text, 0.8), max_width = QUICK - 100 }),
+            },
+        },
     }
 end
 
@@ -361,37 +288,22 @@ shell.popup {
     input = "widgets",
     view = function(ctx)
         local L = light()
-        local row = function(id, label, opts)
-            opts = opts or {}
-            opts.light = L
-            return menu_row(ctx, id, 36, label, opts)
+        local list = toasts.today()
+        local marks, rows = {}, {}
+        for i, n in ipairs(list) do
+            local d = os.date("*t", n.time)
+            marks[#marks + 1] = d.hour + d.min / 60
+            if i <= 4 then rows[#rows + 1] = entry(ctx, n, L) end
         end
-        local rows = {
-            row("q:launcher", "Launcher", { on_click = function()
-                shell.close("quick")
-                toggle_launcher()
-            end }),
-            row("q:next", "Next window", { on_click = function()
-                shell.cycle()
-                shell.close("quick")
-            end }),
-        }
-        local active = shell.active_workspace()
-        for _, name in ipairs(shell.workspaces()) do
-            rows[#rows + 1] = row("q:ws:" .. name, "Workspace  " .. name, {
-                pip = name == active, strong = name == active,
-                on_click = function()
-                    shell.workspace(name)
-                    shell.close("quick")
-                end,
-            })
+        if #list > 4 then
+            rows[#rows + 1] = shell.row { height = 22, padding = { 0, 18, 0, 64 },
+                caps(string.format("and %d earlier", #list - 4), { color = a(t.text_dim, 0.45) }) }
         end
-        rows[#rows + 1] = shell.box { height = 5 }
-        rows[#rows + 1] = divider()
-        rows[#rows + 1] = shell.box { height = 5 }
-        rows[#rows + 1] = row("q:quit", "Quit Shady", { danger = true,
-            on_click = function() shell.quit() end })
-        rows[#rows + 1] = shell.box { height = 8 }
+        if #list == 0 then
+            rows[1] = shell.row { height = 40, padding = { 0, 18 },
+                shell.text(toasts.dnd() and "Nothing has disturbed you." or "A quiet day so far.",
+                    { font = serif(16, true), letter_spacing = 0, color = a(t.text_dim, 0.7) }) }
+        end
         return panel(18, { 28, 10, SHADE + 12, SHADE }, {
             id = "quick-card", width = QUICK, light = L,
             shell.column {
@@ -399,7 +311,7 @@ shell.popup {
                 caps(shell.date("%A · %d %B")),
                 shell.text(shell.date("%H:%M"), { font = serif(46), letter_spacing = 0 }),
             },
-            shell.row { padding = { 2, 18, 0, 18 }, day_wave(L, QUICK - 36, 76) },
+            shell.row { padding = { 2, 18, 0, 18 }, day_wave(L, QUICK - 36, 76, marks) },
             shell.row {
                 padding = { 3, 17, 10, 17 }, justify = "space-between",
                 caps("00", { color = a(t.text_dim, 0.5) }), caps("06", { color = a(t.text_dim, 0.5) }),
@@ -407,8 +319,13 @@ shell.popup {
                 caps("24", { color = a(t.text_dim, 0.5) }),
             },
             divider(),
-            shell.box { height = 5 },
+            shell.row { padding = { 6, 14, 10, 14 }, calendar.month(ctx, L, QUICK - 28) },
+            divider(),
+            K.heading(toasts.dnd() and "Today · do not disturb" or "Today",
+                #list > 0 and K.button(ctx, "day:clear", "Clear", L, { height = 20, pad = 0,
+                    on_click = function() shell.clear_notifications() end }) or false),
             rows,
+            shell.box { height = 10 },
         })
     end,
 }
@@ -477,37 +394,6 @@ end
 -- Serve org.freedesktop.Notifications unless another daemon already does.
 shell.notification_server()
 
-local function active_notifications(limit)
-    local list = {}
-    for _, n in ipairs(shell.notifications()) do
-        if n.active and #list < limit then list[#list + 1] = n end
-    end
-    return list
-end
-
--- The toast popup is open exactly while something is on screen. The
--- history outlives config reloads, so sync once now as well.
-local function sync_toasts()
-    local any = #active_notifications(1) > 0
-    if any and not shell.is_open("toasts") then
-        shell.open("toasts")
-    elseif not any and shell.is_open("toasts") then
-        shell.close("toasts")
-    end
-end
-shell.on("notifications", sync_toasts)
-
--- A click runs the "default" action if there is one, else dismisses.
-local function activate(n)
-    for _, action in ipairs(n.actions) do
-        if action.key == "default" then
-            shell.invoke_notification(n.id, "default")
-            return
-        end
-    end
-    shell.dismiss_notification(n.id)
-end
-
 -- A slip of paper with the light down its left edge (red when critical).
 local function toast(ctx, n, L)
     local id = "toast:" .. n.id
@@ -539,7 +425,7 @@ local function toast(ctx, n, L)
             left = 0, right = 0, align = "stretch", padding = { 0, 0, 13, 0 },
             shell.row {
                 id = id, padding = { 12, 10, 0, 18 }, gap = 10, align = "start",
-                on_click = function() activate(n) end,
+                on_click = function() toasts.activate(n) end,
                 shell.column {
                     grow = 1, shrink = 1, align = "start", gap = 4,
                     caps(n.app ~= "" and n.app or "Notification", { color = mix(lit, t.text_dim, 0.45) }),
@@ -568,7 +454,7 @@ shell.popup {
     view = function(ctx)
         local L = light()
         local cards = {}
-        for _, n in ipairs(active_notifications(4)) do cards[#cards + 1] = toast(ctx, n, L) end
+        for _, n in ipairs(toasts.shown(4)) do cards[#cards + 1] = toast(ctx, n, L) end
         return shell.column {
             gap = 10, align = "stretch", padding = { 26, 10, SHADE + 8, SHADE },
             exit = { opacity = 0, translate = { 28, 0 } }, animate = "snappy",
@@ -576,9 +462,36 @@ shell.popup {
         }
     end,
 }
-sync_toasts()
+-- The toast popup is open exactly while something is to be shown (with
+-- do-not-disturb on, only what is critical).
+toasts.follow { popup = "toasts" }
 
 -- ---- bar ---------------------------------------------------------------
+
+-- A running focus span on a day line `width` wide whose line is at `y`:
+-- lit where the sun has already walked, dashed ahead of it, a flag at its
+-- end. Past midnight it stops at the end of the line.
+local function focus_span(L, width, y)
+    local from, to = F.span()
+    if not from then return false end
+    local function hour_of(when)
+        local d = os.date("*t", when)
+        return d.hour + d.min / 60 + d.sec / 3600
+    end
+    local h0, h1, now = hour_of(from), hour_of(to), hour_of(os.time())
+    if h1 < h0 then h1 = 24 end
+    now = math.max(h0, math.min(now, h1))
+    local x0, x1, xn = width * h0 / 24, width * h1 / 24, width * now / 24
+    local bright = mix(L, WHITE, 0.35)
+    return {
+        { "line", x0, y - 2.5, x0, y + 0.5, stroke = a(bright, 0.6) },
+        { "line", x0, y - 1, xn, y - 1, width = 2.5, cap = "round", stroke = a(bright, 0.95) },
+        { "line", xn, y - 1, x1, y - 1, width = 2, dash = { 2, 3 }, stroke = a(bright, 0.6) },
+        { "line", x1, y - 9, x1, y + 0.5, width = 1.5, stroke = bright },
+        { "circle", x1, y - 9, 1.8, fill = bright },
+        { "circle", x1, y - 4, 8, fill = shell.gradient("radial", a(L, 0.4), a(L, 0)) },
+    }
+end
 
 -- The day line: a hairline along the bar's lower edge, an hour to each
 -- tick, lit up to where the sun stands now.
@@ -602,6 +515,8 @@ local function day_line(L, width)
         fill = shell.gradient("radial", a(L, 0.6), a(L, 0.16), a(L, 0.04), a(L, 0)) }
     shapes[#shapes + 1] = { "circle", x, BAR, 9, fill = shell.gradient("radial", a(L, 0.9), a(L, 0)) }
     shapes[#shapes + 1] = { "circle", x, BAR, 3.6, fill = mix(L, WHITE, 0.82) }
+    -- A running focus span, from where it started to where it ends.
+    shapes[#shapes + 1] = focus_span(L, width, y)
     return shell.canvas { left = 0, top = 0, right = 0, bottom = 0, shapes }
 end
 
@@ -672,6 +587,63 @@ local function tasks(ctx, L)
     return shell.row { grow = 1, clip = true, tabs }
 end
 
+-- The span of a running focus timer, and how long it has left.
+local function focus_tab(ctx, L)
+    if not F.running() then return false end
+    return tab("focus", false, ctx.hovered == "focus", L, {
+        padding = { 0, 12 }, gap = 7,
+        enter = { opacity = 0, translate = { 0, 8 } }, animate = "smooth",
+        on_click = function(button, info)
+            if button == "left" then toggle_controls(info.output) end
+        end,
+        caps("Focus", { color = mix(L, WHITE, 0.3) }),
+        shell.text(F.left() .. "′", { font = serif(14.5), letter_spacing = 0, height = BAR - 4 }),
+    })
+end
+
+-- What is playing: three bars that stand up while it plays, and the title.
+-- A click plays or pauses it; the other buttons open the machine sheet.
+local function media_tab(ctx, L)
+    local m = S.media()
+    if not m then return false end
+    local hovered = ctx.hovered == "media"
+    local heights = m.playing and { 7, 11, 5 } or { 2, 2, 2 }
+    local bars = {}
+    for i, h in ipairs(heights) do
+        local x = 2 + (i - 1) * 4
+        bars[#bars + 1] = { "line", x, 13, x, 13 - h, width = 2, cap = "round",
+            stroke = m.playing and L or a(t.text, 0.45) }
+    end
+    return tab("media", false, hovered, L, {
+        max_width = 240, padding = { 0, 12 }, gap = 8,
+        enter = { opacity = 0, translate = { 0, 8 } }, animate = "smooth",
+        on_click = function(button, info)
+            if button == "left" then
+                S.act.media("play-pause")
+                shell.redraw()
+            else
+                toggle_controls(info.output)
+            end
+        end,
+        shell.canvas { key = "media:bars", width = 12, height = 14, animate = "bouncy", bars },
+        shell.text(m.title ~= "" and m.title or m.artist, { shrink = 1, font = serif(14.5, true),
+            letter_spacing = 0, height = BAR - 4, color = a(t.text, (m.playing or hovered) and 0.9 or 0.55) }),
+    })
+end
+
+-- The instruments: radios, sound and charge on one tab, which opens the
+-- machine sheet.
+local function instruments(ctx, L)
+    local open = shell.is_open("controls") and controls_output == ctx.output
+    return tab("status", open, ctx.hovered == "status", L, {
+        padding = { 0, 12 }, gap = 10,
+        on_click = function(button, info)
+            if button == "left" then toggle_controls(info.output) end
+        end,
+        controls.instruments(ctx, L),
+    })
+end
+
 local function clock(ctx, L)
     local open = shell.is_open("quick") and quick_output == ctx.output
     return tab("clock", open, ctx.hovered == "clock", L, {
@@ -714,11 +686,47 @@ shell.bar {
                 tasks(ctx, L),
                 options.bar_extra and options.bar_extra(ctx) or false,
                 options.bar_extra and shell.box { width = 8 } or false,
+                focus_tab(ctx, L),
+                media_tab(ctx, L),
+                instruments(ctx, L),
                 clock(ctx, L),
             },
         }
     end,
 }
+
+-- ---- the machine sheet, the lock screen, the almanac ------------------------
+
+local screen_lock = lock.install()
+controls.install {
+    lock = screen_lock.lock,
+    can_lock = screen_lock.available(),
+}
+if options.desk ~= false then calendar.install_desk() end
+
+-- ---- keys from the compositor ------------------------------------------------
+
+-- Meridian has no compositor side of its own. To give its parts keys, bind
+-- them in ~/.config/shady/init.lua to a published value, with a serial so
+-- the same word twice is still a change:
+--
+--     local n = 0
+--     local function meridian(what)
+--         return function() n = n + 1; shady.publish("meridian.do", what .. " " .. n) end
+--     end
+--     shady.bind("Super+l", meridian("lock"))
+--
+-- Words: lock, controls, day, launcher, dnd, focus [minutes].
+require("commands").listen("meridian.do", {
+    lock = function() screen_lock.lock() end,
+    controls = function() toggle_controls() end,
+    day = function() toggle_quick() end,
+    launcher = function() toggle_launcher() end,
+    dnd = function() toasts.set_dnd(not toasts.dnd()) end,
+    focus = function(arg)
+        if F.running() then F.stop() else F.start(tonumber(arg) or 25) end
+    end,
+})
 
 -- ---- shortcut overlay (Super+Shift+/) ----------------------------------
 

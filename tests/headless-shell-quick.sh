@@ -23,6 +23,8 @@ chmod 700 "$runtime"
 : >"$status"
 
 export XDG_RUNTIME_DIR="$runtime"
+# The default UI reads and runs nothing of the machine, and keeps its state here.
+export SHADY_SHELL_OFFLINE=1 XDG_STATE_HOME="$XDG_RUNTIME_DIR/state"
 export WLR_BACKENDS=headless
 export WLR_HEADLESS_OUTPUTS=1
 export WLR_RENDERER=pixman
@@ -53,8 +55,8 @@ if grep -Eq 'AddressSanitizer|runtime error:|UndefinedBehaviorSanitizer' "$log";
   echo "shell-quick: FAIL: sanitizer diagnostic found" >&2
   exit 1
 fi
-grep -q '^NEXT=PASS$' "$status"
-grep -q '^WORKSPACE=PASS$' "$status"
+grep -q '^FOCUS=PASS$' "$status"
+grep -q '^DND=PASS$' "$status"
 grep -q '^QUIT_REQUESTED=PASS$' "$status"
 
 echo "shell-quick: PASS"

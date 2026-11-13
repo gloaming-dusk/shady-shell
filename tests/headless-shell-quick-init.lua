@@ -1,9 +1,14 @@
+-- The default UI's sheets, with the system sources off (SHADY_SHELL_OFFLINE),
+-- so the machine sheet has the same rows everywhere: the day sheet opens
+-- from the clock, the machine sheet from a published `meridian.do`, its
+-- focus and do-not-disturb rows write their state files (focus_timer,
+-- toasts), and Log out asks
+-- before it ends the session.
 local shell = assert(os.getenv("SHADY_SHELL_BIN"))
 local probe = assert(os.getenv("SHADY_AUTOMATION_PROBE"))
 local status = assert(os.getenv("SHADY_SHELL_QUICK_STATUS"))
+local state = assert(os.getenv("XDG_STATE_HOME")) .. "/shady/"
 
-local mapped = {}
-local focused = ""
 local started = false
 
 local function mark(line)
@@ -12,70 +17,47 @@ local function mark(line)
     f:close()
 end
 
-assert(shady.workspace("x"))
-assert(shady.workspace("main"))
+local function saved(name)
+    local f = io.open(state .. name, "r")
+    if not f then return "" end
+    local text = f:read("a")
+    f:close()
+    return text
+end
 
-shady.on("window.focused", function(window)
-    focused = window.app_id or ""
-end)
+local function click(x, y)
+    shady.automation.move_pointer(x, y)
+    shady.automation.click("left")
+end
 
 shady.on("window.mapped", function(window)
-    local id = window.app_id
-    if id ~= "shady-quick-a" and id ~= "shady-quick-b" then return end
-    mapped[id] = true
-
-    if id == "shady-quick-a" and not mapped["shady-quick-b"] then
-        shady.automation.after(80, function()
-            shady.spawn(string.format(
-                "SHADY_AUTOMATION_PROBE_APP_ID=shady-quick-b SHADY_AUTOMATION_PROBE_COLOR=0xff304f80 %q",
-                probe))
-        end)
-        return
-    end
-
-    if started or not mapped["shady-quick-a"] or not mapped["shady-quick-b"] then
-        return
-    end
+    if window.app_id ~= "shady-quick-a" or started then return end
     started = true
 
-    shady.automation.after(450, function()
-        assert(focused == "shady-quick-b",
-            "expected probe-b focused initially, got " .. focused)
+    -- The day sheet, from the clock; then the calendar's next month.
+    click(1238, 19)
+    shady.automation.after(200, function()
+        click(1235, 288)
+    end)
 
-        -- Open the day sheet from the clock and click Next window (row 1,
-        -- under the clock face and the day wave).
-        shady.automation.move_pointer(1238, 19)
-        shady.automation.click("left")
-        shady.automation.after(120, function()
-            shady.automation.move_pointer(1120, 324)
-            shady.automation.click("left")
-
-            shady.automation.after(160, function()
-                assert(focused == "shady-quick-a",
-                    "quick settings Next window did not cycle focus; got " .. focused)
-                mark("NEXT=PASS")
-
-                -- Open again and choose workspace x (row 3: Launcher, Next, main, x).
-                shady.automation.move_pointer(1238, 19)
-                shady.automation.click("left")
-                shady.automation.after(120, function()
-                    shady.automation.move_pointer(1120, 396)
-                    shady.automation.click("left")
-
-                    shady.automation.after(160, function()
-                        assert(shady.current_workspace() == "x",
-                            "quick settings workspace switch failed")
-                        mark("WORKSPACE=PASS")
-
-                        -- The bar remains on-screen on workspace x. Re-open and Quit Shady.
-                        shady.automation.move_pointer(1238, 19)
-                        shady.automation.click("left")
-                        shady.automation.after(120, function()
-                            mark("QUIT_REQUESTED=PASS")
-                            -- Quit is the last row, under a divider.
-                            shady.automation.move_pointer(1120, 443)
-                            shady.automation.click("left")
-                        end)
+    -- The shell ignores the values replayed when it connects, for 2 s.
+    shady.automation.after(3200, function()
+        shady.publish("meridian.do", "controls 1")
+        shady.automation.after(300, function()
+            -- Focus for 25 minutes, then do-not-disturb.
+            click(1176, 225)
+            shady.automation.after(200, function()
+                assert(saved("focus"):find("until=%d+"), "focus did not start")
+                mark("FOCUS=PASS")
+                click(1100, 183)
+                shady.automation.after(200, function()
+                    assert(saved("notifications"):find("dnd=1"), "do not disturb did not turn on")
+                    mark("DND=PASS")
+                    -- Log out: the first click only asks.
+                    click(1108, 276)
+                    shady.automation.after(300, function()
+                        mark("QUIT_REQUESTED=PASS")
+                        click(1108, 276)
                     end)
                 end)
             end)

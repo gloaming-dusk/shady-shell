@@ -46,6 +46,8 @@ LUA
 write_config 1
 (
     export XDG_RUNTIME_DIR="$tmp/runtime"
+    # The default UI reads and runs nothing of the machine, and keeps its state here.
+    export SHADY_SHELL_OFFLINE=1 XDG_STATE_HOME="$XDG_RUNTIME_DIR/state"
     unset WAYLAND_DISPLAY WAYLAND_SOCKET SHADY_SOCKET
     export WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 WLR_RENDERER=pixman
     export SHADY_LUA_INIT="$ROOT/tests/headless-shell-lua-init.lua"
@@ -94,6 +96,8 @@ startup_log="$tmp/startup.log"
 printf 'error("deliberately broken")\n' >"$config"
 (
     export XDG_RUNTIME_DIR="$tmp/runtime"
+    # The default UI reads and runs nothing of the machine, and keeps its state here.
+    export SHADY_SHELL_OFFLINE=1 XDG_STATE_HOME="$XDG_RUNTIME_DIR/state"
     unset WAYLAND_DISPLAY WAYLAND_SOCKET SHADY_SOCKET
     export WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 WLR_RENDERER=pixman
     export SHADY_LUA_INIT="$ROOT/tests/headless-shell-lua-init.lua"
