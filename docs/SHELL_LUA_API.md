@@ -310,7 +310,7 @@ draws a load dial.
 |---|---|
 | `id` | names the widget; `ctx.hovered` reports it when the pointer is over it |
 | `on_click` | `function(button, info)` with `button` = `"left"`, `"right"` or `"middle"` |
-| `on_drag` | `function(info)`: called when the left button goes down on the widget, on every move while it is held (also outside the widget) and once more with `info.done = true` on release |
+| `on_drag` | `function(info)`: called when the left button goes down on the widget, on every move while it is held (also outside the widget, within the surface) and once more with `info.done = true` on release, or when the pointer leaves the surface |
 | `on_scroll` | `function(dy, dx, info)`: wheel or touchpad scrolling over the widget, in pixels, positive down and right |
 
 `info` holds the widget's box (`x`, `y`, `width`, `height`), the pointer

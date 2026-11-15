@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- A drag ends when the pointer leaves the surface. Let go outside it, the
+  release went elsewhere and the drag stayed on: a slider followed the
+  pointer when it came back.
 - `press = {...}`: a style a widget wears while the left button holds it
   down, over `hover`. With a spring it is a key that sinks and springs back.
 - Spring presets `"pop"` (jumps past its target and settles), `"jelly"`

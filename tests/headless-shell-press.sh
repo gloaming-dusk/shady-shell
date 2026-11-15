@@ -2,7 +2,9 @@
 # What springy, sticker-like UIs are built from: a widget's `press` style
 # shows while the left button holds it down and goes when it is let go;
 # text takes an `outline` and a glyph-shaped `text_shadow`; and shell.apps
-# gives the PNG an application's Icon= names from the hicolor theme.
+# gives the PNG an application's Icon= names from the hicolor theme. A
+# drag released outside the surface ends there: the release goes elsewhere,
+# and the drag must not follow the pointer when it comes back.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -81,10 +83,23 @@ sleep 0.4
 expect_pixel 30 30 "255 0 0" "the key once it is let go"
 
 # The letter: blue outline and yellow shadow somewhere across its row.
-blue="$(count 70 120 30 "0 0 255")"
-yellow="$(count 70 120 46 "255 255 0")"
+blue="$(count 205 260 30 "0 0 255")"
+yellow="$(count 205 260 46 "255 255 0")"
 (( blue > 0 )) || fail "no outline around the letter"
 (( yellow > 0 )) || fail "no shadow under the letter"
+
+# The slider (the box after the key) is dragged off the bar and let go
+# there; moving back over it must not drag it any more.
+ctl lua 'shady.automation.drag(130, 30, 130, 400)'
+wait_for 1 "drag=[0-9]* done"
+sleep 0.3
+before="$(grep -c 'drag=' "$log")"
+ctl lua 'shady.automation.move_pointer(120, 30)'
+sleep 0.2
+ctl lua 'shady.automation.move_pointer(160, 32)'
+sleep 0.3
+after="$(grep -c 'drag=' "$log")"
+(( after == before )) || fail "the drag followed the pointer after it was let go outside ($before -> $after)"
 
 ctl quit
 wait "$comp" || fail "compositor exited with an error"
