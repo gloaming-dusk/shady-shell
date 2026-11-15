@@ -703,11 +703,18 @@ static void call_drag(struct view *view, bool done) {
     call(L, 1, 0, "on_drag", NULL, 0);
 }
 
+static void close_blurred(struct shell_lua *lua, struct view *except);
+
 static void view_button(void *data, struct shell_surface *surface, uint32_t button,
         bool pressed) {
     (void)surface;
     struct view *view = data;
     if (!view->tree || view->closing) return;
+    /* A press on the desktop (a background or bottom layer surface: the
+     * wallpaper, desktop widgets) is focus moving away from any popup. */
+    if (pressed && view->def->popup && (view->def->layer == ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND ||
+            view->def->layer == ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM))
+        close_blurred(view->lua, view);
     if (button == 0x110 && view->holding != pressed) {
         /* A widget with a `press` style shows it while the button is down.
          * Like hover, it is not in the tree: paint the whole surface. */
@@ -806,9 +813,23 @@ static void view_closed(void *data, struct shell_surface *surface) {
     if (host.app && wl_list_empty(&lua->views)) shell_core_stop(&lua->shell->core);
 }
 
+/* Close every open popup with close_on_blur except `except`. */
+static void close_blurred(struct shell_lua *lua, struct view *except) {
+    bool any = false;
+    struct view *v, *tmp;
+    wl_list_for_each_safe(v, tmp, &lua->views, link) {
+        if (v == except || !v->def->popup || !v->def->close_on_blur || v->closing) continue;
+        close_view(v);
+        any = true;
+    }
+    if (any) redraw_all(lua);
+}
+
 /* A popup with close_on_blur goes when the keyboard moves elsewhere: a click
  * on a window, or another popup taking it. Its own closing (which gives up
- * the keyboard first) and clicks on surfaces without a keyboard leave it. */
+ * the keyboard first) leaves it; so do clicks on a bar, whose buttons often
+ * toggle the popup themselves. See also close_blurred's other callers: a
+ * click on the desktop, and another window taking the focus. */
 static void view_keyboard_leave(void *data, struct shell_surface *surface) {
     (void)surface;
     struct view *view = data;
@@ -2898,6 +2919,10 @@ void shell_lua_emit_strings(struct shell *shell, const char *event,
         }
     }
     lua_pop(L, 2);
+}
+
+void shell_lua_window_focused(struct shell *shell) {
+    if (shell->lua) close_blurred(shell->lua, NULL);
 }
 
 void shell_lua_emit(struct shell *shell, const char *event) {

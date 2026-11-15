@@ -43,6 +43,7 @@ stdenv.mkDerivation {
       ../clipboard.lua
       ../dock.lua
       ../screenshot.lua
+      ../settings_app.lua
       ../apps
       ../data
       ../bin
