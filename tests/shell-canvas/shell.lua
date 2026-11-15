@@ -1,6 +1,6 @@
 -- tests/headless-shell-canvas.sh: canvases, a radial gradient and a soft
 -- shadow on a grey bar 60 high. Widgets are 40x40 at y = 10, at x = 10, 60,
--- 110, 190 and 240.
+-- 110, 190, 240 and 290.
 shell.bar {
     name = "canvas-bar",
     size = 60,
@@ -30,6 +30,8 @@ shell.bar {
                 { "arc", 20, 20, 15, 0, 180, stroke = "#ff00ff", width = 4 },
                 false,
             },
+            -- Sheared 45 degrees about its centre (310, 30): the top leans right.
+            shell.box { width = 40, height = 40, background = "#00ff00", skew = 45 },
             shell.spacer(),
         }
     end,

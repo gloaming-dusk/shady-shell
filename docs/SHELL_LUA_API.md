@@ -204,6 +204,7 @@ backdrop with all four 0); otherwise `justify` places it horizontally and
 | `opacity` | 0..1 for the widget and its children |
 | `scale` | drawing scale about the widget's centre, default 1 |
 | `rotate` | drawing rotation about the widget's centre, in degrees clockwise |
+| `skew` | horizontal shear about the widget's centre, in degrees (-75..75): positive leans the top to the right, like italics, and turns a box into a parallelogram. Children are sheared with it; give them the opposite `skew` to stand upright again |
 | `translate` | `{x, y}` drawing offset in pixels |
 | `shadow` | `{x, y, colour[, blur]}`: a copy of the widget's shape, offset behind it: hard, or soft over `blur` pixels (up to 96). With no offset a blurred shadow is a glow. `false` for none |
 | `hover` | a table of style properties used while the pointer is over the widget |
@@ -218,7 +219,7 @@ backdrop with all four 0); otherwise `justify` places it horizontally and
 
 Colours are `"#RGB"`, `"#RRGGBB"`, `"#RRGGBBAA"` or `{r, g, b, a}` in 0..1.
 
-`scale`, `rotate` and `translate` move only what is drawn; layout and
+`scale`, `rotate`, `skew` and `translate` move only what is drawn; layout and
 hit-testing use the untransformed box.
 
 ### Animation
@@ -227,7 +228,7 @@ Views return a new tree on every repaint; an animated widget is matched
 with its previous self and springs from its old look to its new one.
 Position and size (relative to the parent, so children ride along with a
 moving parent), `background` (gradients included), `border`, `color`,
-`opacity`, `scale`, `rotate`, `translate` and `shadow` (its blur too) all
+`opacity`, `scale`, `rotate`, `skew`, `translate` and `shadow` (its blur too) all
 animate.
 
 | Property | |

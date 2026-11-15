@@ -48,7 +48,8 @@ bool ui_spring_preset(const char *name, struct ui_spring *out) {
  * count as settled: a tenth of a pixel, or about a quarter of a colour step. */
 static double epsilon(int ch) {
     if (ch < UI_CH_OPACITY || ch == UI_CH_TX || ch == UI_CH_TY || ch == UI_CH_SHADOW_X ||
-            ch == UI_CH_SHADOW_Y || ch == UI_CH_SHADOW_BLUR || ch == UI_CH_ROTATE)
+            ch == UI_CH_SHADOW_Y || ch == UI_CH_SHADOW_BLUR || ch == UI_CH_ROTATE ||
+            ch == UI_CH_SKEW)
         return 0.1; /* pixels, degrees */
     return 0.001;
 }
@@ -178,6 +179,7 @@ static void set_targets(struct ui_anim *state, const struct ui_node *node,
     t[UI_CH_TX] = s->has_translate ? s->translate[0] : 0;
     t[UI_CH_TY] = s->has_translate ? s->translate[1] : 0;
     t[UI_CH_ROTATE] = s->has_rotate ? s->rotate : 0;
+    t[UI_CH_SKEW] = s->has_skew ? s->skew : 0;
     t[UI_CH_SHADOW_X] = s->has_shadow ? s->shadow[0] : state->value[UI_CH_SHADOW_X];
     t[UI_CH_SHADOW_Y] = s->has_shadow ? s->shadow[1] : state->value[UI_CH_SHADOW_Y];
     t[UI_CH_SHADOW_BLUR] = s->has_shadow ? s->shadow_blur : state->value[UI_CH_SHADOW_BLUR];

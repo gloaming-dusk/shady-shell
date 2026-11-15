@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Canvas widgets, radial gradients and soft shadows: shapes are drawn where
 # they are put, in their own colours or the widget's, a view box scales, a
-# blurred shadow falls off around its box, and a bad shape is an error the
+# blurred shadow falls off around its box, a skewed box is a parallelogram, and a bad shape is an error the
 # shell survives. Both renderers draw them alike.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -84,6 +84,12 @@ run() {
     expect_pixel 250 5 "32 32 32" "past the shadow"
     near="$(red 233 52)"
     (( near > 32 )) || fail "soft shadow corner: $near"
+
+    # Skew: a parallelogram, past the box at the top right, cut at the top left.
+    expect_pixel 345 12 "0 255 0" "skewed box's top leans right"
+    expect_pixel 293 12 "32 32 32" "skewed box's top left corner is cut"
+    expect_pixel 275 48 "0 255 0" "skewed box's bottom leans left"
+    expect_pixel 345 48 "32 32 32" "skewed box's bottom right corner is cut"
 
     # A shape the canvas does not know is the view's error; putting it right
     # brings the bar back.
