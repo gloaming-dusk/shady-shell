@@ -51,7 +51,7 @@ struct ui_paint {
 };
 
 /* Style fields a node sets; `hover`, `enter` and `exit` override the ones
- * they set. `scale`, `rotate` (degrees, both about the node's centre) and
+ * they set. `scale`, `rotate`, `skew` (degrees, all about the node's centre) and
  * `translate` move only the drawing: layout and hit-testing keep the
  * untransformed rectangle. `shadow` is an offset copy of the node's shape
  * drawn behind it: hard, or soft over `shadow_blur` pixels (a glow, with no
@@ -71,6 +71,8 @@ struct ui_style {
     bool has_translate;
     double rotate;
     bool has_rotate;
+    double skew; /* degrees: horizontal shear about the centre, top to the right */
+    bool has_skew;
     double shadow[2]; /* offset */
     double shadow_color[4];
     double shadow_blur;

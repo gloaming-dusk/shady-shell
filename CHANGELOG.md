@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `skew = degrees`: a horizontal shear about the widget's centre, so a box
+  becomes a parallelogram (a slanted tab, a leaning button). It animates
+  like `rotate`, and a child with the opposite skew stands upright.
 - A drag ends when the pointer leaves the surface. Let go outside it, the
   release went elsewhere and the drag stayed on: a slider followed the
   pointer when it came back.

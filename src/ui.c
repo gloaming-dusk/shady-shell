@@ -232,6 +232,10 @@ static void read_style(struct build *b, int t, struct ui_style *style) {
     style->has_rotate = lua_isnumber(b->L, -1);
     style->rotate = style->has_rotate ? lua_tonumber(b->L, -1) : 0;
     lua_pop(b->L, 1);
+    lua_getfield(b->L, t, "skew");
+    style->has_skew = lua_isnumber(b->L, -1);
+    style->skew = style->has_skew ? fmax(-75, fmin(75, lua_tonumber(b->L, -1))) : 0;
+    lua_pop(b->L, 1);
     /* shadow = {x, y, colour[, blur]} or {x =, y =, color =, blur =}; false
      * for none. */
     lua_getfield(b->L, t, "shadow");
@@ -1607,6 +1611,7 @@ void ui_merge_style(struct ui_style *out, const struct ui_style *over) {
         out->has_translate = true;
     }
     if (over->has_rotate) { out->rotate = over->rotate; out->has_rotate = true; }
+    if (over->has_skew) { out->skew = over->skew; out->has_skew = true; }
     if (over->has_shadow) {
         memcpy(out->shadow, over->shadow, sizeof(out->shadow));
         memcpy(out->shadow_color, over->shadow_color, sizeof(out->shadow_color));
@@ -1636,6 +1641,8 @@ static void style_from_anim(const struct ui_anim *anim, struct ui_style *s) {
     s->has_translate = true;
     s->rotate = v[UI_CH_ROTATE];
     s->has_rotate = true;
+    s->skew = v[UI_CH_SKEW];
+    s->has_skew = true;
     s->shadow[0] = v[UI_CH_SHADOW_X];
     s->shadow[1] = v[UI_CH_SHADOW_Y];
     s->shadow_blur = fmax(0, v[UI_CH_SHADOW_BLUR]);
@@ -1926,13 +1933,20 @@ void ui_draw(cairo_t *cr, const struct ui_node *node, const struct ui_node *hove
     }
     double scale = s.has_scale ? fmax(0, s.scale) : 1.0;
     double rotate = s.has_rotate ? s.rotate : 0;
-    bool moved = dx != 0 || dy != 0 || scale != 1.0 || rotate != 0;
+    double skew = s.has_skew ? s.skew : 0;
+    bool moved = dx != 0 || dy != 0 || scale != 1.0 || rotate != 0 || skew != 0;
     if (moved) {
         cairo_save(cr);
         cairo_translate(cr, dx, dy);
-        if (scale != 1.0 || rotate != 0) {
+        if (scale != 1.0 || rotate != 0 || skew != 0) {
             cairo_translate(cr, x + w / 2, y + h / 2);
             cairo_rotate(cr, rotate * G_PI / 180.0);
+            if (skew != 0) {
+                /* x' = x - tan(skew) * y: the top leans right, like italics. */
+                cairo_matrix_t shear;
+                cairo_matrix_init(&shear, 1, 0, -tan(skew * G_PI / 180.0), 1, 0, 0);
+                cairo_transform(cr, &shear);
+            }
             cairo_scale(cr, scale, scale);
             cairo_translate(cr, -(x + w / 2), -(y + h / 2));
         }
@@ -2186,6 +2200,8 @@ static uint64_t hash_style(uint64_t h, const struct ui_style *s) {
     if (s->has_translate) h = HASH(h, s->translate);
     h = HASH(h, s->has_rotate);
     if (s->has_rotate) h = HASH(h, s->rotate);
+    h = HASH(h, s->has_skew);
+    if (s->has_skew) h = HASH(h, s->skew);
     h = HASH(h, s->has_shadow);
     if (s->has_shadow) {
         h = HASH(h, s->shadow);
@@ -2286,12 +2302,13 @@ static void diff_grow(double rect[4], bool *any, const struct ui_node *n, double
 
 static bool transformed(const struct ui_node *n) {
     return (n->style.has_scale && n->style.scale != 1.0) ||
-        (n->style.has_rotate && n->style.rotate != 0.0);
+        (n->style.has_rotate && n->style.rotate != 0.0) ||
+        (n->style.has_skew && n->style.skew != 0.0);
 }
 
 /* A changed node and everything drawn under it: children are not clipped
- * to their parent, so they may overflow it. False when one is scaled or
- * rotated (repaint all). */
+ * to their parent, so they may overflow it. False when one is scaled,
+ * rotated or skewed (repaint all). */
 static bool diff_grow_tree(double rect[4], bool *any, const struct ui_node *n, double ox, double oy) {
     if (n->hidden) return true;
     if (transformed(n)) return false;
