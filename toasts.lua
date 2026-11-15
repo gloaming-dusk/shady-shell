@@ -25,6 +25,12 @@ local followed
 
 function M.dnd() return state.get("dnd") == "1" end
 
+-- Quiet hours turned on or off elsewhere (another rice, the Settings app).
+state.watch(function()
+    M.sync()
+    if shell.redraw then shell.redraw() end
+end)
+
 function M.shown(limit)
     local list, quiet = {}, M.dnd()
     for _, n in ipairs(shell.notifications()) do

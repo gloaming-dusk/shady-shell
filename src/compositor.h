@@ -11,6 +11,7 @@
  */
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <stddef.h>
 
 struct shell;
@@ -37,5 +38,8 @@ bool shell_compositor_toggle_shortcuts(void);
 /* Ask the compositor to save its next frame, after delay_ms, to ~/Pictures. */
 bool shell_compositor_lua(const char *code);
 bool shell_compositor_screenshot(int delay_ms);
+/* The same with options: `path` (NULL for the compositor's default),
+ * `output` (NULL for the first to draw), `window` (0 for none). */
+bool shell_compositor_screenshot_ex(int delay_ms, const char *path, const char *output, uint32_t window);
 
 #endif

@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- The clipboard without wl-copy: through wlr-data-control the shell serves
+  what it copies (`shell.set_clipboard(text or {path=})`) and reads what
+  other clients copy (the `clipboard` event, `shell.clipboard()`), text
+  and pictures, never a password manager's secrets.
+- `require("clipboard")`: a history of copies kept across restarts, with
+  pins, and a panel to copy from it again.
+- `require("dock")`: a dock you arrange: pin, unpin and drag applications
+  into your order (kept in the statefile `dock`), with a menu for New
+  window, Close and Move; a rice can restyle it.
+- `require("screenshot")`: a region, window or screen picker that needs
+  neither grim nor wl-copy; pictures go to `~/Pictures/Screenshots` and
+  the clipboard. `shell.screenshot{path=, output=, window=}` and
+  `shell.image_crop` for it.
+- The Settings app (`shady-settings`), from Gloam's, for any rice: a
+  wallpaper picker with thumbnails, and pages for the dock's pins, the
+  clipboard's history and quiet hours besides the appearance, windows and
+  input.
+- `statefile`: `watch(fn)` for changes made by another process, `reload()`,
+  and writes that replace the file at once. `toasts` follows quiet hours
+  turned on elsewhere.
 - `skew = degrees`: a horizontal shear about the widget's centre, so a box
   becomes a parallelogram (a slanted tab, a leaning button). It animates
   like `rotate`, and a child with the opposite skew stands upright.

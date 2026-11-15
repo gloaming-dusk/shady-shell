@@ -395,7 +395,11 @@ Window arguments may also be the window tables themselves.
 | `shell.key(keys)` | press a compositor shortcut such as `"Super+t"` (the IPC `key` command); false when not connected |
 | `shell.shortcuts()` | the compositor's shortcut list as of its last `shortcuts` event: `{keys, group, description}` each (see Shortcut overlay) |
 | `shell.toggle_shortcuts()` | ask the compositor to toggle the shortcut overlay; false when not connected |
-| `shell.screenshot([delay_ms])` | ask the compositor to save its next frame, after the delay, to `~/Pictures` (the IPC `screenshot` command; needs no grim); the `value` event with `screenshot.saved` follows once it is written. Give a closing panel ~300 ms to leave the picture |
+| `shell.screenshot([delay_ms])`, `shell.screenshot{delay=, path=, output=, window=}` | ask the compositor to save its next frame, after the delay, to `~/Pictures` or `path` (the IPC `screenshot` command; needs no grim), only `output`, or only the window with that `id`; the `value` event with `screenshot.saved` (the path) follows once it is written. Give a closing panel ~300 ms to leave the picture |
+| `shell.image_crop(src, dst, x, y, width, height)` | save part of a picture, in its own pixels, as a PNG; true, or nil and a message |
+| `shell.clipboard()` | what is on the clipboard: the text and `"text"`, or a picture's path and `"image"`, or nothing (see Clipboard) |
+| `shell.set_clipboard(text)`, `shell.set_clipboard{path=}` | serve text, or a PNG/JPEG/WebP picture, as the clipboard until something else is copied; true when served |
+| `shell.clipboard_available()` | whether the compositor gives the shell the clipboard (wlr-data-control) |
 | `shell.notify(summary[, body[, app]])` | show a notification of the shell's own, like one a client sent |
 | `shell.fonts(dir)` | make the font files in `dir` (relative to the config file, or absolute) available by family name; call it before the views use them. The data directory's `fonts` holds Manrope and Instrument Serif, which the default UI is set in: `shell.fonts(shell.data_dir .. "/fonts")` |
 | `shell.data_dir`, `shell.config_path` | where the default UI and your config live |
@@ -447,6 +451,27 @@ shell.on("notifications", function()
     end
 end)
 ```
+
+## Clipboard
+
+Through wlr-data-control the shell is a clipboard client of its own: it
+serves what it copies (`shell.set_clipboard`, no wl-copy process) and
+reads what any other client copies. Each copy it reads becomes the
+`clipboard` event with `("text", text)` or `("image", path)`; pictures
+(PNG) are written to `$XDG_CACHE_HOME/shady/clipboard/`. A copy that a
+password manager marks as secret (`x-kde-passwordManagerHint`) is never
+read, and texts over 1 MiB or pictures over 16 MiB are skipped.
+`SHADY_SHELL_NO_CLIPBOARD=1` turns it off. What the shell copies stays
+on the clipboard until something else is copied or the shell exits.
+
+```lua
+shell.on("clipboard", function(kind, value) shell.log("copied " .. kind) end)
+shell.set_clipboard("hello")
+shell.set_clipboard({ path = "/tmp/shot.png" })
+```
+
+The data directory's `clipboard` module keeps a history of these copies
+and has a panel to copy from it again (see Parts with a look).
 
 ## Wallpaper
 
@@ -610,7 +635,32 @@ documents its functions at the top.
 | `require("launches")` | which applications are launched, how often and how lately, kept across restarts: `launch(app)` (record and run), `record(app)`, `score(app)`, `sort(apps)` (most used first), `top(apps, n)` |
 | `require("focus_timer")` | a span of time from now, kept across restarts, with a notification at its end: `start(minutes)`, `stop()`, `running()`, `left()`, `span()` |
 | `require("almanac")` | dates and the sky: `month(year, month)` as weeks, `shift`, `month_name`, `moon_phase`, `moon_lit`, `moon_name`, `moon_path` (for `shell.canvas`), `year_day`, `week` |
-| `require("statefile")(name)` | a few `key=value`s that outlive the shell, in `$XDG_STATE_HOME/shady/<name>`: `get(key)`, `set(key, value)` |
+| `require("statefile")(name)` | a few `key=value`s that outlive the shell, in `$XDG_STATE_HOME/shady/<name>`: `get(key)`, `set(key, value)` (the file is replaced at once), `reload()`, `watch(fn)`: `fn()` after another process changed it |
+
+## Parts with a look
+
+These come with a default look that follows `shell.theme`, and take a
+`palette`, fonts and drawing functions so a rice can make them its own.
+Each file documents its options at the top.
+
+| Module | |
+|---|---|
+| `require("clipboard")` | the clipboard's history, kept across restarts (`history()`, `copy(text or {path=} or entry)`, `pin(id)`, `remove(id)`, `clear()`), and `install{...}` a panel: search, Enter copies, Tab pins, Delete removes; `toggle()` opens it. The Settings app sets how much is kept |
+| `require("dock")` | a dock of pinned applications, in your order, then what has a window: click focuses or starts, drag moves a pin, right click for Pin/Unpin, New window, Close, Move. Pins in the statefile `dock` (`pins()`, `pin(name)`, `unpin(name)`, `move(name, by)`), which the Settings app also edits. `install{art=, launcher=, style={shelf=, tile=, mark=, menu=}}` |
+| `require("screenshot")` | screenshots without grim or wl-copy: `install{...}`, `open([mode])` for a picker (region, window, screen), `take{mode=}` at once. Saved to `~/Pictures/Screenshots`, copied to the clipboard, announced with a notification |
+
+## The Settings app
+
+`shady-settings [page]` (`shady-shell --app apps/settings.lua`) sets the
+accent, the wallpaper (from thumbnails of `~/Pictures`, `~/Pictures/Wallpapers`
+and `~/.config/shady/wallpapers`), window corners and gaps, the keyboard
+and touchpad, the dock's pins, how much clipboard history is kept, and
+quiet hours. It writes where the running desktop already looks:
+`~/.config/shady/settings.lua` (read by Tide's config, and applied at once
+with `shady.set`; the compositor value `shady.settings` changes for shells
+that redraw), the wallpaper state that `shady-wallpaper` writes, and the
+statefiles `dock`, `clipboard` and `notifications`, which those modules
+watch.
 
 With `SHADY_SHELL_OFFLINE=1` (the headless tests) `machine` reads nothing
 and runs nothing: every source is nil and every action only logs.

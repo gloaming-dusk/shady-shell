@@ -44,6 +44,7 @@ protocols = {
   'ext-session-lock-v1': join_paths(wayland_protocols_dir, 'staging/ext-session-lock/ext-session-lock-v1.xml'),
   'text-input-unstable-v3': join_paths(wayland_protocols_dir, 'unstable/text-input/text-input-unstable-v3.xml'),
   'wlr-layer-shell-unstable-v1': join_paths(wlr_protocols_dir, 'unstable/wlr-layer-shell-unstable-v1.xml'),
+  'wlr-data-control-unstable-v1': join_paths(wlr_protocols_dir, 'unstable/wlr-data-control-unstable-v1.xml'),
   'shady-shell-v1': files('protocol/shady-shell-v1.xml'),
 }
 protocol_sources = {}
@@ -85,6 +86,7 @@ executable('shady-shell',
     'src/script.c',
     'src/plugins.c',
     'src/compositor.c',
+    'src/clipboard.c',
     'src/auth.c',
     'src/ipc/json.c',
   ],
@@ -173,13 +175,17 @@ executable('ime-probe',
 install_data('default.lua', 'shortcut_overlay.lua', 'wallpaper.lua',
   'almanac.lua', 'commands.lua', 'focus_timer.lua', 'launches.lua', 'lockscreen.lua', 'machine.lua',
   'statefile.lua', 'toasts.lua',
+  # Parts with a default look a rice can restyle.
+  'clipboard.lua', 'dock.lua', 'screenshot.lua',
   install_dir: shell_data_install_dir)
-foreach dir : ['examples', 'fonts', 'meridian', 'shaders']
+foreach dir : ['apps', 'examples', 'fonts', 'meridian', 'shaders']
   install_subdir(dir, install_dir: shell_data_install_dir)
 endforeach
 install_data('bin/shady-brightness', install_dir: join_paths(shell_data_install_dir, 'bin'),
   install_mode: 'rwxr-xr-x')
 install_data('bin/shady-wallpaper', install_dir: get_option('bindir'), install_mode: 'rwxr-xr-x')
+install_data('bin/shady-settings', install_dir: get_option('bindir'), install_mode: 'rwxr-xr-x')
+install_data('data/shady-settings.desktop', install_dir: join_paths(get_option('datadir'), 'applications'))
 
 # For shell plugins built elsewhere (the greeter's greetd plugin, rices'):
 # the plugin ABI header, the protocol, and where plugins are installed.

@@ -317,6 +317,25 @@ bool shell_compositor_screenshot(int delay_ms) {
     return n > 0 && send(link_state.fd, request, (size_t)n, MSG_NOSIGNAL) == n;
 }
 
+bool shell_compositor_screenshot_ex(int delay_ms, const char *path, const char *output, uint32_t window) {
+    if (!link_state.ready || link_state.fd < 0 || delay_ms < 0 || delay_ms > 10000) return false;
+    struct json_buf request = { 0 };
+    json_printf(&request, "{\"cmd\":\"screenshot\",\"delay\":%d", delay_ms);
+    if (path) {
+        json_puts(&request, ",\"path\":");
+        json_string(&request, path);
+    }
+    if (output) {
+        json_puts(&request, ",\"output\":");
+        json_string(&request, output);
+    }
+    if (window) json_printf(&request, ",\"window\":%u", window);
+    json_puts(&request, "}\n");
+    bool sent = send(link_state.fd, request.data, request.len, MSG_NOSIGNAL) == (ssize_t)request.len;
+    json_buf_free(&request);
+    return sent;
+}
+
 bool shell_compositor_toggle_shortcuts(void) {
     if (!link_state.ready || link_state.fd < 0) return false;
     static const char request[] = "{\"cmd\":\"shortcuts.toggle\"}\n";
