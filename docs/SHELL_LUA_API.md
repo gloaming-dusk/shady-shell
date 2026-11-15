@@ -207,11 +207,14 @@ backdrop with all four 0); otherwise `justify` places it horizontally and
 | `translate` | `{x, y}` drawing offset in pixels |
 | `shadow` | `{x, y, colour[, blur]}`: a copy of the widget's shape, offset behind it: hard, or soft over `blur` pixels (up to 96). With no offset a blurred shadow is a glow. `false` for none |
 | `hover` | a table of style properties used while the pointer is over the widget |
+| `press` | a table of style properties used while the left button holds the widget down (over `hover`); with a spring, a key that sinks and springs back: `press = {translate = {0, 3}, shadow = {0, 1, ink}}` |
 | `font` | Pango font, e.g. `"Sans SemiBold 9.5"`; default `"Sans Medium 9.5"` |
 | `letter_spacing` | points, default 0.25 |
 | `text_align` | 0 left .. 1 right, within the text's box |
 | `ellipsize` | default true |
 | `wrap`, `max_lines` | break text into lines at `max_width` (or `width`), ellipsizing after `max_lines` if set |
+| `outline` | text: `{width, colour}`, a stroke around the glyphs under their fill, for sticker lettering |
+| `text_shadow` | text: `{x, y, colour}`, a hard copy of the (outlined) glyphs offset behind them. Unlike `shadow`, it follows the letters, not the box. Both make the text's box larger by what they add |
 
 Colours are `"#RGB"`, `"#RRGGBB"`, `"#RRGGBBAA"` or `{r, g, b, a}` in 0..1.
 
@@ -229,12 +232,12 @@ animate.
 
 | Property | |
 |---|---|
-| `animate` | `true`, a preset (`"smooth"`, `"snappy"`, `"bouncy"`, `"gentle"`) or `{stiffness = n, damping = n}`; `false` turns it off |
+| `animate` | `true`, a preset (`"smooth"`, `"snappy"`, `"bouncy"`, `"gentle"`; `"pop"`, which jumps past its target and settles, for things popping in; `"jelly"`, which wobbles a few times; `"clack"`, a quick key going down and back) or `{stiffness = n, damping = n}`; `false` turns it off |
 | `enter` | style a new widget starts from, e.g. `{opacity = 0, scale = 0.96, translate = {0, -6}}` |
 | `exit` | style a closing popup's widgets go to before the popup goes away |
 | `key` | identity for matching; by default the `id`, else the parent's key and the child's position |
 
-`enter`, `exit` and `hover` animate with `"smooth"` without `animate`.
+`enter`, `exit`, `hover` and `press` animate with `"smooth"` without `animate`.
 `key` is for widgets that need a stable identity but must not become
 `ctx.hovered` targets, such as a dot that comes and goes inside a pill.
 
@@ -381,7 +384,7 @@ Window arguments may also be the window tables themselves.
 | `shell.date(format)` | `strftime` of the local time; views using it repaint each minute, or each second if the format shows seconds |
 | `shell.poll(command, ms[, fallback])` | the trimmed output of `sh -c command`, rerun every `ms` (at least 100); `fallback` or `""` until the first run ends |
 | `shell.listen(command[, fallback])` | the latest line printed by a long-running command, restarted if it exits |
-| `shell.apps(query, limit)` | `.desktop` applications matching the query: `{name, exec, categories}`, `categories` being the entry's `Categories=` as written (`"Network;WebBrowser;"`, or `""`) |
+| `shell.apps(query, limit)` | `.desktop` applications matching the query: `{name, exec, categories, icon}`, `categories` being the entry's `Categories=` as written (`"Network;WebBrowser;"`, or `""`), `icon` the PNG its `Icon=` names in the hicolor theme or `pixmaps` of the XDG data directories (absent when there is none; SVG-only icons are not found) |
 | `shell.launch(app)` / `shell.spawn(command)` | run an app or a command |
 | `shell.theme` | the palette: `accent`, `accent_2`, `accent_deep`, `surface`, `text`, `text_dim`, `danger` (from the `SHADY_SHELL_*` variables) |
 | `shell.mix(a, b, t)` | blend two colours |
@@ -603,6 +606,7 @@ documents its functions at the top.
 | `require("lockscreen").install{view=, ...}` | the lock screen's typing, the PAM check, a fingerprint reader listening alongside, and taking an abandoned lock over; `view(ctx, state)` draws it from `state.length`, `busy`, `message`, `error`, `attempts`. Returns `lock()` and `available()`; `before_lock` and `fallback` hook in |
 | `require("toasts")` | which notifications to show (`shown(limit)`), do-not-disturb kept across restarts and shared by rices (`dnd()`, `set_dnd(on)`), what a click does (`activate(n)`), `today()`, and `follow{popup=, hold=}` to keep a popup open exactly while there is something to show |
 | `require("commands").listen(key, handlers)` | words published by the compositor (`shady.publish(key, "lock " .. serial)`) back into calls, ignoring the value replayed when the shell connects |
+| `require("launches")` | which applications are launched, how often and how lately, kept across restarts: `launch(app)` (record and run), `record(app)`, `score(app)`, `sort(apps)` (most used first), `top(apps, n)` |
 | `require("focus_timer")` | a span of time from now, kept across restarts, with a notification at its end: `start(minutes)`, `stop()`, `running()`, `left()`, `span()` |
 | `require("almanac")` | dates and the sky: `month(year, month)` as weeks, `shift`, `month_name`, `moon_phase`, `moon_lit`, `moon_name`, `moon_path` (for `shell.canvas`), `year_day`, `week` |
 | `require("statefile")(name)` | a few `key=value`s that outlive the shell, in `$XDG_STATE_HOME/shady/<name>`: `get(key)`, `set(key, value)` |

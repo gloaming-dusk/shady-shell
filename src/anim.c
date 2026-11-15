@@ -29,6 +29,9 @@ static const struct {
     { "snappy", { 520, 44 } },
     { "bouncy", { 300, 20 } }, /* overshoots a little */
     { "gentle", { 120, 22 } },
+    { "pop", { 520, 17 } }, /* jumps past its target and settles: things popping in */
+    { "jelly", { 380, 11 } }, /* wobbles a few times */
+    { "clack", { 900, 22 } }, /* a key going down and coming back */
 };
 
 bool ui_spring_preset(const char *name, struct ui_spring *out) {

@@ -123,6 +123,51 @@ static bool get_color(struct build *b, int t, const char *key, double rgba[4]) {
     return ok;
 }
 
+/* outline = {width, colour} and text_shadow = {x, y, colour} on text. */
+static void read_lettering(struct build *b, int t, struct ui_node *node) {
+    lua_State *L = b->L;
+    lua_getfield(L, t, "outline");
+    if (lua_istable(L, -1)) {
+        lua_rawgeti(L, -1, 1);
+        node->outline_width = fmin(fmax(lua_tonumber(L, -1), 0), 16);
+        lua_pop(L, 1);
+        lua_rawgeti(L, -1, 2);
+        node->has_outline = read_color(L, node->outline_color) && node->outline_width > 0;
+        lua_pop(L, 1);
+        if (!node->has_outline && node->outline_width > 0)
+            build_error(b, "outline must be {width, colour}%s", NULL);
+    } else if (!lua_isnil(L, -1) && lua_toboolean(L, -1)) {
+        build_error(b, "outline must be {width, colour}%s", NULL);
+    }
+    lua_pop(L, 1);
+    lua_getfield(L, t, "text_shadow");
+    if (lua_istable(L, -1)) {
+        for (int i = 0; i < 2; i++) {
+            lua_rawgeti(L, -1, i + 1);
+            node->text_shadow[i] = fmin(fmax(lua_tonumber(L, -1), -32), 32);
+            lua_pop(L, 1);
+        }
+        lua_rawgeti(L, -1, 3);
+        node->has_text_shadow = read_color(L, node->text_shadow_color);
+        lua_pop(L, 1);
+        if (!node->has_text_shadow) build_error(b, "text_shadow must be {x, y, colour}%s", NULL);
+    } else if (!lua_isnil(L, -1) && lua_toboolean(L, -1)) {
+        build_error(b, "text_shadow must be {x, y, colour}%s", NULL);
+    }
+    lua_pop(L, 1);
+}
+
+/* What lettering adds around the glyphs: left, top, right, bottom. */
+static void lettering_margin(const struct ui_node *node, double m[4]) {
+    double ow = node->has_outline ? node->outline_width : 0;
+    m[0] = m[1] = m[2] = m[3] = ow;
+    if (node->has_text_shadow) {
+        double sx = node->text_shadow[0], sy = node->text_shadow[1];
+        if (sx < 0) m[0] += -sx; else m[2] += sx;
+        if (sy < 0) m[1] += -sy; else m[3] += sy;
+    }
+}
+
 /* The paint on top of the stack: a solid colour or {gradient = "vertical" |
  * "horizontal" | "diagonal" | "radial", c1, c2, ...}. */
 static bool read_paint(lua_State *L, struct ui_paint *paint) {
@@ -239,7 +284,7 @@ static void read_animation(struct build *b, int t, struct ui_node *node) {
     lua_pop(L, 1);
 
     ui_spring_preset("smooth", &node->spring);
-    node->animate = node->has_enter || node->has_exit || node->has_hover;
+    node->animate = node->has_enter || node->has_exit || node->has_hover || node->has_press;
     lua_getfield(L, t, "animate");
     if (lua_type(L, -1) == LUA_TBOOLEAN) {
         node->animate = lua_toboolean(L, -1);
@@ -849,6 +894,12 @@ static struct ui_node *build_node(struct build *b, int t, int depth) {
         read_style(b, lua_gettop(L), &node->hover);
     }
     lua_pop(L, 1);
+    lua_getfield(L, t, "press");
+    if (lua_istable(L, -1)) {
+        node->has_press = true;
+        read_style(b, lua_gettop(L), &node->press);
+    }
+    lua_pop(L, 1);
     read_animation(b, t, node);
     node->id = get_string(L, t, "id");
     node->key = get_string(L, t, "key");
@@ -891,6 +942,7 @@ static struct ui_node *build_node(struct build *b, int t, int depth) {
         node->text_align = get_number(L, t, "text_align", 0);
         node->wrap = get_bool(L, t, "wrap", false);
         node->max_lines = (int)get_number(L, t, "max_lines", 0);
+        read_lettering(b, t, node);
         break;
     case UI_NODE_PIP:
         node->pip_radius = get_number(L, t, "radius", 3);
@@ -1069,8 +1121,10 @@ void ui_measure(cairo_t *cr, struct ui_node *node, const struct ui_defaults *def
         int pw = 0, ph = 0;
         pango_layout_get_pixel_size(node->layout, &pw, &ph);
         if (node->wrap_width > 0) pw = (int)ceil(node->wrap_width);
-        w = pw;
-        h = ph;
+        double margin[4];
+        lettering_margin(node, margin);
+        w = pw + margin[0] + margin[2];
+        h = ph + margin[1] + margin[3];
         break;
     }
     case UI_NODE_PIP:
@@ -1262,8 +1316,10 @@ static void set_rect(cairo_t *cr, struct ui_node *node, double x, double y, doub
             }
         }
     } else if (node->kind == UI_NODE_TEXT && node->layout && node->ellipsize && w + 0.5 < node->nat_w) {
+        double m[4];
+        lettering_margin(node, m);
         pango_layout_set_ellipsize(node->layout, PANGO_ELLIPSIZE_END);
-        pango_layout_set_width(node->layout, (int)(w * PANGO_SCALE));
+        pango_layout_set_width(node->layout, (int)(fmax(0, w - m[0] - m[2]) * PANGO_SCALE));
     }
     if (node->kind == UI_NODE_BOX) layout_box(cr, node);
 }
@@ -1559,10 +1615,13 @@ void ui_merge_style(struct ui_style *out, const struct ui_style *over) {
     }
 }
 
+const struct ui_node *ui_pressed;
+
 void ui_resolve_style(const struct ui_node *node, const struct ui_node *hovered,
         struct ui_style *out) {
     *out = node->style;
     if (node == hovered && node->has_hover) ui_merge_style(out, &node->hover);
+    if (node == ui_pressed && node->has_press) ui_merge_style(out, &node->press);
 }
 
 /* What an animated node draws this frame: its springs' current values. */
@@ -1840,6 +1899,9 @@ static void draw_shapes(cairo_t *cr, const struct ui_node *node, const double co
     cairo_set_dash(cr, NULL, 0, 0);
 }
 
+/* The nearest animated ancestor of the node being drawn, if any. */
+static struct ui_anim *draw_owner;
+
 void ui_draw(cairo_t *cr, const struct ui_node *node, const struct ui_node *hovered,
         const struct ui_defaults *defaults) {
     if (node->hidden) return;
@@ -1876,10 +1938,21 @@ void ui_draw(cairo_t *cr, const struct ui_node *node, const struct ui_node *hove
         }
     }
     double pad = 6 + node->border_width + (s.has_shadow ? shadow_reach(&s) : 0);
+    if (node->has_text_shadow) pad += fabs(node->text_shadow[0]) + fabs(node->text_shadow[1]);
     if (anim) {
         struct ui_anim *state = (struct ui_anim *)anim;
         device_box(cr, x, y, w, h, pad, state->drawn);
         state->has_drawn = true;
+    } else if (draw_owner && draw_owner->has_drawn) {
+        /* Not animated itself but carried by an animated ancestor (tape on
+         * a card that springs in): it may stick out of the ancestor's box,
+         * so where it goes is part of the ancestor's damage. */
+        double box[4];
+        device_box(cr, x, y, w, h, pad, box);
+        double *d = draw_owner->drawn;
+        double x1 = fmin(d[0], box[0]), y1 = fmin(d[1], box[1]);
+        double x2 = fmax(d[0] + d[2], box[0] + box[2]), y2 = fmax(d[1] + d[3], box[1] + box[3]);
+        d[0] = x1; d[1] = y1; d[2] = x2 - x1; d[3] = y2 - y1;
     }
     if (!ui_draw_recording && node->child_count == 0) {
         /* Outside the damage of this frame: nothing to draw. (Containers
@@ -1941,8 +2014,43 @@ void ui_draw(cairo_t *cr, const struct ui_node *node, const struct ui_node *hove
             double box = lw;
             if (node->wrap_width > 0 && pango_layout_get_width(node->layout) > 0)
                 box = pango_layout_get_width(node->layout) / (double)PANGO_SCALE;
-            double tx = x + (w - box) * node->text_align;
-            double ty = y + (h - lh) / 2;
+            double m[4];
+            lettering_margin(node, m);
+            double tx = x + (w - box - m[0] - m[2]) * node->text_align + m[0];
+            double ty = y + (h - lh - m[1] - m[3]) / 2 + m[1];
+            if (node->has_outline || node->has_text_shadow) {
+                /* The glyphs as a path: the shadow is the outlined glyphs
+                 * offset, the outline a stroke the fill then covers half of. */
+                double ow = node->has_outline ? node->outline_width : 0;
+                cairo_save(cr);
+                cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+                cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+                if (node->has_text_shadow) {
+                    const double *c = node->text_shadow_color;
+                    cairo_new_path(cr);
+                    cairo_move_to(cr, tx + node->text_shadow[0], ty + node->text_shadow[1]);
+                    pango_cairo_layout_path(cr, node->layout);
+                    cairo_set_source_rgba(cr, c[0], c[1], c[2], c[3] * color[3]);
+                    if (ow > 0) {
+                        cairo_set_line_width(cr, ow * 2);
+                        cairo_fill_preserve(cr);
+                        cairo_stroke(cr);
+                    } else {
+                        cairo_fill(cr);
+                    }
+                }
+                if (node->has_outline) {
+                    const double *c = node->outline_color;
+                    cairo_new_path(cr);
+                    cairo_move_to(cr, tx, ty);
+                    pango_cairo_layout_path(cr, node->layout);
+                    cairo_set_line_width(cr, ow * 2);
+                    cairo_set_source_rgba(cr, c[0], c[1], c[2], c[3] * color[3]);
+                    cairo_stroke(cr);
+                }
+                cairo_restore(cr);
+                cairo_new_path(cr);
+            }
             cairo_set_source_rgba(cr, color[0], color[1], color[2], color[3]);
             cairo_move_to(cr, tx, ty);
             pango_cairo_show_layout(cr, node->layout);
@@ -1988,10 +2096,14 @@ void ui_draw(cairo_t *cr, const struct ui_node *node, const struct ui_node *hove
     case UI_NODE_IMAGE:
         if (node->image) draw_image(cr, node->image, node->fit, x, y, w, h);
         break;
-    case UI_NODE_BOX:
+    case UI_NODE_BOX: {
+        struct ui_anim *owner = draw_owner;
+        if (anim) draw_owner = (struct ui_anim *)anim;
         for (size_t i = 0; i < node->child_count; i++)
             ui_draw(cr, node->children[i], hovered, defaults);
+        draw_owner = owner;
         break;
+    }
     }
 
     if (group) {
@@ -2020,7 +2132,7 @@ struct ui_node *ui_hit_handler(struct ui_node *node, double x, double y, enum ui
 static bool interactive(const struct ui_node *node, bool clickable) {
     if (clickable) return node->on_click != LUA_NOREF;
     return node->on_click != LUA_NOREF || node->on_drag != LUA_NOREF ||
-        node->on_scroll != LUA_NOREF || node->id || node->has_hover;
+        node->on_scroll != LUA_NOREF || node->id || node->has_hover || node->has_press;
 }
 
 struct ui_node *ui_hit(struct ui_node *node, double x, double y, bool clickable) {
@@ -2103,6 +2215,8 @@ static uint64_t node_hash(const struct ui_node *n, uint64_t h, bool *dynamic, bo
     h = hash_style(h, &n->style);
     h = HASH(h, n->has_hover);
     if (n->has_hover) h = hash_style(h, &n->hover);
+    h = HASH(h, n->has_press);
+    if (n->has_press) h = hash_style(h, &n->press);
     h = HASH(h, n->animate);
     if (n->animate) h = HASH(h, n->spring);
     h = HASH(h, n->has_enter);
@@ -2116,6 +2230,10 @@ static uint64_t node_hash(const struct ui_node *n, uint64_t h, bool *dynamic, bo
     h = hash_string(h, n->font);
     h = HASH(h, n->letter_spacing); h = HASH(h, n->ellipsize); h = HASH(h, n->text_align);
     h = HASH(h, n->wrap); h = HASH(h, n->max_lines);
+    h = HASH(h, n->has_outline);
+    if (n->has_outline) { h = HASH(h, n->outline_width); h = HASH(h, n->outline_color); }
+    h = HASH(h, n->has_text_shadow);
+    if (n->has_text_shadow) { h = HASH(h, n->text_shadow); h = HASH(h, n->text_shadow_color); }
     h = HASH(h, n->pip_radius); h = HASH(h, n->lit);
     h = HASH(h, n->image); h = HASH(h, n->fit);
     h = hash_string(h, n->icon);

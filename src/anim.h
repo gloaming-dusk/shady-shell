@@ -71,7 +71,8 @@ bool ui_anims_damage(struct ui_anims *anims, double rect[4]);
 /* Whether any node in the tree has an `exit` style. */
 bool ui_tree_has_exit(const struct ui_node *tree);
 
-/* "smooth", "snappy", "bouncy" or "gentle"; false for other names. */
+/* "smooth", "snappy", "bouncy", "gentle", "pop", "jelly" or "clack";
+ * false for other names. */
 bool ui_spring_preset(const char *name, struct ui_spring *out);
 
 #endif

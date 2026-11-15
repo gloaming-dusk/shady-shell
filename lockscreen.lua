@@ -19,7 +19,8 @@
 --                notification saying so
 --   fingerprint  the PAM service for the reader, default
 --                "shady-lock-fingerprint"; it is used only when
---                /etc/pam.d has it. false: no reader
+--                /etc/pam.d has it (and never with SHADY_SHELL_OFFLINE=1).
+--                false: no reader
 --   wrong        the message for a password PAM said no to without a reason
 --
 -- The state a view reads (and should not change):
@@ -45,6 +46,8 @@ function M.install(opts)
     local name = opts.name or "lock"
     local service = opts.fingerprint
     if service == nil then service = "shady-lock-fingerprint" end
+    -- The headless tests and screenshots run offline: no reader there.
+    if os.getenv("SHADY_SHELL_OFFLINE") == "1" then service = false end
     local wrong = opts.wrong or "That was not it."
 
     local password = ""
