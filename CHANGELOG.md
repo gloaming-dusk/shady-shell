@@ -2,9 +2,10 @@
 
 ## Unreleased
 
-- `close_on_blur` closes a popup whenever focus leaves it: another window
-  taking the focus or a click on the desktop, not only the keyboard moving
-  away, so panels without the keyboard close too.
+- `close_on_blur` closes a popup whenever focus leaves it: a click on any
+  window (the focused one too), on the desktop, or another window taking the
+  focus, not only the keyboard moving away, so panels without the keyboard
+  close too. Bars and docks keep their clicks.
 - `require("settings_app").open([page])`: start the Settings app of the
   shady-shell that is running, also from a checkout where it is not on PATH.
 - The screenshot picker's hint sits on a dark pill, and `margin` lifts its

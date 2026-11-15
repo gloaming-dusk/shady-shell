@@ -102,10 +102,13 @@ shell.popup {
 
 With `close_on_blur = true` the popup closes when focus leaves it: the
 keyboard moving elsewhere (with a `keyboard` mode that takes it), another
-window taking the focus (a click on a window, a window opening), or a click
-on the desktop (the shell's own `background` and `bottom` layer surfaces,
-such as the wallpaper). Clicks on a bar leave it open, since a bar's button
-often toggles the popup itself.
+window taking the focus, or a click anywhere else but on a bar or a dock.
+While such a popup is open the shell lays an invisible surface over the
+windows (on the `top` layer, kept off the zones bars and docks reserve)
+and lets its desktop surfaces take the whole pointer, so a click on any
+window, the focused one included, or on the desktop reaches the shell and
+closes the popup instead. Clicks on a bar or a dock still go to them: a
+bar's button often toggles the popup itself.
 
 With `text_input = true` (and a `keyboard` mode) the popup takes text from
 the input method, through text-input-v3: what is still being composed is

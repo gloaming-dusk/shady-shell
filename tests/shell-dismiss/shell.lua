@@ -1,8 +1,8 @@
 -- tests/headless-shell-dismiss.sh: a popup with close_on_blur and no
--- keyboard, over a wallpaper on the background layer (the left half of
--- the screen) and a bar.
+-- keyboard, a bar, and a wallpaper on the background layer that takes the
+-- pointer only over widgets (it has none), as the wallpaper module's does.
 shell.popup {
-    name = "dismiss-wall", layer = "background", fill = true, outputs = "all",
+    name = "dismiss-wall", layer = "background", fill = true, outputs = "all", input = "widgets",
     view = function(ctx)
         return shell.box { width = ctx.width, height = ctx.height, background = "#203040" }
     end,

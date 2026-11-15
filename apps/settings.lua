@@ -184,7 +184,7 @@ local function setting(label, control, hint, complaint)
         shell.column { grow = 1, shrink = 1, align = "start", gap = 2,
             text(label, { font = font("SemiBold", 10) }),
             (complaint or hint) and text(complaint or hint, { font = font("Medium", 8.5),
-                color = complaint and P.danger or P.dim, wrap = true, max_lines = 2 }) or false,
+                color = complaint and P.danger or P.dim, wrap = true, max_lines = 2, max_width = 300 }) or false,
         },
         control,
     }
@@ -311,9 +311,15 @@ local function wallpaper_grid(ctx)
             on_click = function() choose_wallpaper(path) end,
             shell.image { left = 2, top = 2, width = 128, height = 80, path = path, fit = "cover" } }
     end
+    -- As many to a row as the window has room for (sidebar 190, padding),
+    -- three rows at most: the page does not scroll.
+    local cols = math.max(1, math.floor(((ctx.width or 900) - 190 - 44 - 32 + 10) / 142))
+    while #tiles > cols * 3 do table.remove(tiles) end
     local rows = {}
-    for i = 1, #tiles, 4 do
-        rows[#rows + 1] = shell.row { gap = 10, tiles[i], tiles[i + 1] or false, tiles[i + 2] or false, tiles[i + 3] or false }
+    for i = 1, #tiles, cols do
+        local row = {}
+        for j = i, math.min(#tiles, i + cols - 1) do row[#row + 1] = tiles[j] end
+        rows[#rows + 1] = shell.row { gap = 10, row }
     end
     return shell.column { gap = 10, padding = { 12, 16 }, align = "start", rows }
 end
@@ -547,7 +553,6 @@ shell.window {
             width = ctx.width, height = ctx.height, align = "stretch", background = P.base,
             sidebar(ctx),
             shell.column { key = "page:" .. page, grow = 1, shrink = 1, align = "stretch", gap = 18, padding = 22,
-                clip = true,
                 text(PAGES[page].title, { font = font("Bold", 16) }),
                 body,
             },

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# close_on_blur without the keyboard: a popup closes when the desktop (a
-# background layer surface) is clicked and when another window takes the
-# focus, and stays open when a bar is clicked.
+# close_on_blur without the keyboard: a popup closes when the desktop is
+# clicked (even a wallpaper that lets clicks through: it takes them while
+# such a popup is open), when the focused window is clicked, and when
+# another window takes the focus; it stays open when a bar is clicked.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -65,17 +66,27 @@ click 5 700
 send check
 wait_for 1 "PANEL closed"
 
-# Another window taking the focus.
+# A click on the window that has the focus already: no focus change, but
+# the catcher over the windows takes it.
 send open
 sleep 0.3
 send check
 wait_for 2 "PANEL open"
+click 640 400
+send check
+wait_for 2 "PANEL closed"
+
+# Another window taking the focus.
+send open
+sleep 0.3
+send check
+wait_for 3 "PANEL open"
 send "focus dismiss-a"
 sleep 0.3
 send "focus dismiss-b"
 sleep 0.4
 send check
-wait_for 2 "PANEL closed"
+wait_for 3 "PANEL closed"
 
 ctl quit
 wait "$comp" || fail "compositor exited with an error"

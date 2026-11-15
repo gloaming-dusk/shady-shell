@@ -68,7 +68,8 @@ struct view_def {
     bool input_widgets; /* take the pointer only over interactive widgets */
     bool text_input; /* take text from input methods (text-input-v3) */
     bool lock; /* a lock surface on every output while the session is locked */
-    bool close_on_blur; /* close the popup when it loses the keyboard */
+    bool close_on_blur; /* close the popup when focus leaves it */
+    bool catcher; /* the shell's own click catcher (see update_desktop_input) */
     /* shell.window: an ordinary application window. */
     bool window;
     char title[NAME_MAX_LEN], app_id[NAME_MAX_LEN];
@@ -155,6 +156,11 @@ struct shell_lua {
     struct wl_list watches; /* file_watch.link */
     int next_after;
     int in_view; /* >0 while a view function runs */
+    /* While a close_on_blur popup is open: an invisible surface over the
+     * windows, under the popups, that takes a click anywhere else. */
+    struct view_def catcher_def;
+    bool catcher_ready;
+    struct view *catcher;
 };
 
 /* shell.authenticate: one attempt and its callbacks. */
@@ -245,6 +251,21 @@ static bool call(lua_State *L, int nargs, int nresults, const char *what, char *
 static void redraw_all(struct shell_lua *lua) {
     struct view *view;
     wl_list_for_each(view, &lua->views, link) shell_surface_redraw(view->surface);
+}
+
+static bool on_desktop_layer(const struct view_def *def) {
+    return def->popup && (def->layer == ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND ||
+        def->layer == ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM);
+}
+
+/* Whether a popup that closes on blur is open: then the desktop surfaces
+ * take the whole pointer, so a click on the desktop reaches the shell and
+ * closes it instead of passing through to the compositor. */
+static bool blur_popup_open(const struct shell_lua *lua) {
+    const struct view *view;
+    wl_list_for_each(view, &lua->views, link)
+        if (view->def->popup && view->def->close_on_blur && !view->closing) return true;
+    return false;
 }
 
 static struct shell_output *find_output(struct shell *shell, const char *name) {
@@ -594,13 +615,115 @@ static void view_draw(void *data, struct shell_surface *surface, cairo_t *cr,
     if (view->def->input_widgets && !view->closing) {
         static int rects[MAX_INPUT_RECTS][4];
         size_t count = 0;
-        collect_input(view->tree, rects, &count);
+        if (on_desktop_layer(view->def) && blur_popup_open(view->lua)) {
+            rects[0][0] = 0;
+            rects[0][1] = 0;
+            rects[0][2] = (int)ceil(width);
+            rects[0][3] = (int)ceil(height);
+            count = 1;
+        } else {
+            collect_input(view->tree, rects, &count);
+        }
         shell_surface_set_input_rects(surface, (const int (*)[4])rects, count);
     }
     if (view->closing && !moving) {
         /* Not from inside draw(): the core still commits this frame. */
         shell_timer_cancel(view->destroy_timer);
         view->destroy_timer = shell_timer_add(&view->lua->shell->core, 0, destroy_later, view);
+    }
+}
+
+static struct view *view_create(struct shell_lua *lua, struct view_def *def,
+    struct shell_output *output, int args, const int32_t *margin,
+    uint32_t width, uint32_t height);
+
+static bool ensure_catcher_def(struct shell_lua *lua) {
+    if (lua->catcher_ready) return true;
+    lua_State *L = lua->L;
+    if (luaL_dostring(L, "return function(ctx) return shell.box { width = ctx.width, height = ctx.height } end")
+            != LUA_OK) {
+        lua_pop(L, 1);
+        return false;
+    }
+    struct view_def *def = &lua->catcher_def;
+    memset(def, 0, sizeof(*def));
+    def->popup = true;
+    snprintf(def->name, sizeof(def->name), "shady-shell-catcher");
+    def->view = luaL_ref(L, LUA_REGISTRYINDEX);
+    def->on_key = LUA_NOREF;
+    def->uniforms = LUA_NOREF;
+    /* Above the windows, under the popups (overlay), anchored to every edge;
+     * margins keep it off the bars' and docks' zones (update_desktop_input),
+     * so they still take their clicks. */
+    def->layer = ZWLR_LAYER_SHELL_V1_LAYER_TOP;
+    def->anchor = ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM |
+        ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT | ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT;
+    def->keyboard = ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE;
+    def->catcher = true;
+    lua->catcher_ready = true;
+    return true;
+}
+
+/* While a close_on_blur popup is open, a click anywhere but on it, a bar
+ * or a dock closes it: the catcher takes clicks over the windows (also the
+ * focused one, which a click would not otherwise tell the shell about), and
+ * the desktop surfaces (background and bottom layer popups that take the
+ * pointer only over widgets) take the whole pointer. Afterwards they let
+ * clicks through again. Input regions are set at once: a surface may not be
+ * drawn again. */
+static void ensure_catcher(struct shell_lua *lua, struct shell_output *output) {
+    if (lua->catcher || !ensure_catcher_def(lua)) return;
+    /* Off the zones of bars and docks on that output (top, right, bottom,
+     * left), which keep their clicks. */
+    int32_t margin[4] = { 0, 0, 0, 0 };
+    struct view *v;
+    wl_list_for_each(v, &lua->views, link) {
+        const struct view_def *d = v->def;
+        if (d->exclusive <= 0 || v->closing || (output && v->output && v->output != output)) continue;
+        uint32_t a = d->anchor;
+        bool top = a & ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP, bottom = a & ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM;
+        bool left = a & ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT, right = a & ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT;
+        int32_t zone = d->exclusive + (top && !bottom ? d->margin[0] : bottom && !top ? d->margin[2] : 0);
+        if (top && !bottom) margin[0] += zone;
+        else if (bottom && !top) margin[2] += zone;
+        else if (left && !right) margin[3] += zone;
+        else if (right && !left) margin[1] += zone;
+    }
+    lua->catcher = view_create(lua, &lua->catcher_def, output, LUA_NOREF, margin, 0, 0);
+}
+
+static void update_desktop_input(struct shell_lua *lua) {
+    bool catch_all = blur_popup_open(lua);
+    if (catch_all && !lua->catcher) {
+        struct shell_output *output = NULL;
+        struct view *v;
+        wl_list_for_each(v, &lua->views, link)
+            if (v->def->close_on_blur && !v->closing) { output = v->output; break; }
+        ensure_catcher(lua, output);
+    } else if (!catch_all && lua->catcher) {
+        /* Not now: this may run inside the catcher's own click. */
+        struct view *catcher = lua->catcher;
+        lua->catcher = NULL;
+        if (!catcher->destroy_timer)
+            catcher->destroy_timer = shell_timer_add(&lua->shell->core, 0, destroy_later, catcher);
+    }
+    struct view *view;
+    wl_list_for_each(view, &lua->views, link) {
+        if (!on_desktop_layer(view->def) || !view->def->input_widgets || view->closing || !view->surface)
+            continue;
+        static int rects[MAX_INPUT_RECTS][4];
+        size_t count = 0;
+        if (catch_all) {
+            rects[0][0] = 0;
+            rects[0][1] = 0;
+            rects[0][2] = (int)view->surface->width;
+            rects[0][3] = (int)view->surface->height;
+            count = 1;
+        } else if (view->tree) {
+            collect_input(view->tree, rects, &count);
+        }
+        shell_surface_set_input_rects(view->surface, (const int (*)[4])rects, count);
+        wl_surface_commit(view->surface->wl_surface);
     }
 }
 
@@ -615,6 +738,7 @@ static void close_view(struct view *view) {
     view->hovered = NULL;
     shell_surface_set_keyboard(view->surface, ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE);
     shell_surface_ignore_input(view->surface);
+    if (view->def->close_on_blur) update_desktop_input(view->lua);
     shell_surface_redraw(view->surface);
     view->destroy_timer = shell_timer_add(&view->lua->shell->core, EXIT_TIMEOUT_MS,
         destroy_later, view);
@@ -709,12 +833,14 @@ static void view_button(void *data, struct shell_surface *surface, uint32_t butt
         bool pressed) {
     (void)surface;
     struct view *view = data;
+    if (view->def->catcher) {
+        if (pressed) close_blurred(view->lua, NULL);
+        return;
+    }
     if (!view->tree || view->closing) return;
     /* A press on the desktop (a background or bottom layer surface: the
      * wallpaper, desktop widgets) is focus moving away from any popup. */
-    if (pressed && view->def->popup && (view->def->layer == ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND ||
-            view->def->layer == ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM))
-        close_blurred(view->lua, view);
+    if (pressed && on_desktop_layer(view->def)) close_blurred(view->lua, view);
     if (button == 0x110 && view->holding != pressed) {
         /* A widget with a `press` style shows it while the button is down.
          * Like hover, it is not in the tree: paint the whole surface. */
@@ -886,6 +1012,9 @@ static struct view *view_create(struct shell_lua *lua, struct view_def *def,
         .title = def->title,
         .app_id = def->app_id,
     };
+    /* The catcher first: a compositor that stacks layer surfaces in the
+     * order they map (Shady outside spatial mode) puts the popup above it. */
+    if (def->close_on_blur) ensure_catcher(lua, output);
     view->surface = shell_surface_create(&lua->shell->core, &config, &view_handler, view);
     if (!view->surface) {
         ui_anims_destroy(view->anims);
@@ -893,6 +1022,8 @@ static struct view *view_create(struct shell_lua *lua, struct view_def *def,
         return NULL;
     }
     wl_list_insert(lua->views.prev, &view->link);
+    /* The desktop starts catching clicks for it. */
+    if (def->close_on_blur) update_desktop_input(lua);
     return view;
 }
 
@@ -906,8 +1037,13 @@ static void view_destroy(struct view *view) {
     ui_free(L, view->tree);
     ui_anims_destroy(view->anims);
     if (view->args != LUA_NOREF) luaL_unref(L, LUA_REGISTRYINDEX, view->args);
+    struct shell_lua *lua = view->lua;
+    bool blur = view->def->close_on_blur;
+    if (lua->catcher == view) lua->catcher = NULL;
     wl_list_remove(&view->link);
     free(view);
+    /* The desktop lets clicks through again. */
+    if (blur) update_desktop_input(lua);
 }
 
 static bool def_wants_output(const struct view_def *def, const struct shell_output *output) {
