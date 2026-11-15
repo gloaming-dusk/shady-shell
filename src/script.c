@@ -25,6 +25,7 @@
 #include "shady-shell-v1-client-protocol.h"
 #include "anim.h"
 #include "auth.h"
+#include "clipboard.h"
 #include "compositor.h"
 #include "image.h"
 #include "notify.h"
@@ -1887,12 +1888,125 @@ static int l_shortcuts(lua_State *L) {
     return 1;
 }
 
-/* shell.screenshot([delay_ms]): the compositor saves a frame to
- * ~/Pictures; its value screenshot.saved names the file once written. */
+/* shell.screenshot([delay_ms]) or shell.screenshot{delay=, path=,
+ * output=, window=}: the compositor saves a frame (or one window of it) to
+ * ~/Pictures or `path`; its value screenshot.saved names the file once
+ * written. */
 static int l_screenshot(lua_State *L) {
+    if (lua_istable(L, 1)) {
+        lua_getfield(L, 1, "delay");
+        lua_Integer delay = luaL_optinteger(L, -1, 0);
+        lua_getfield(L, 1, "path");
+        const char *path = luaL_optstring(L, -1, NULL);
+        lua_getfield(L, 1, "output");
+        const char *output = luaL_optstring(L, -1, NULL);
+        lua_getfield(L, 1, "window");
+        lua_Integer window = luaL_optinteger(L, -1, 0);
+        bool ok = delay >= 0 && delay <= 10000 && window >= 0 && window <= UINT32_MAX &&
+            shell_compositor_screenshot_ex((int)delay, path, output, (uint32_t)window);
+        lua_pop(L, 4);
+        lua_pushboolean(L, ok);
+        return 1;
+    }
     lua_Integer delay = luaL_optinteger(L, 1, 0);
     lua_pushboolean(L, delay >= 0 && delay <= 10000 &&
         shell_compositor_screenshot((int)delay));
+    return 1;
+}
+
+/* shell.image_crop(src, dst, x, y, width, height): the part of a picture
+ * (in its own pixels) saved as a PNG. True, or nil and a message. */
+static int l_image_crop(lua_State *L) {
+    const char *src = luaL_checkstring(L, 1);
+    const char *dst = luaL_checkstring(L, 2);
+    double x = luaL_checknumber(L, 3), y = luaL_checknumber(L, 4);
+    double w = luaL_checknumber(L, 5), h = luaL_checknumber(L, 6);
+    char error[256] = "";
+    cairo_surface_t *image = shell_image_load(src, error, sizeof(error));
+    if (!image) {
+        lua_pushnil(L);
+        lua_pushstring(L, error[0] ? error : "cannot read the picture");
+        return 2;
+    }
+    int iw = cairo_image_surface_get_width(image), ih = cairo_image_surface_get_height(image);
+    int x0 = (int)fmax(0, floor(x)), y0 = (int)fmax(0, floor(y));
+    int x1 = (int)fmin(iw, ceil(x + w)), y1 = (int)fmin(ih, ceil(y + h));
+    if (x1 - x0 < 1 || y1 - y0 < 1) {
+        cairo_surface_destroy(image);
+        lua_pushnil(L);
+        lua_pushstring(L, "the part is outside the picture");
+        return 2;
+    }
+    cairo_surface_t *part = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, x1 - x0, y1 - y0);
+    cairo_t *cr = cairo_create(part);
+    cairo_set_source_surface(cr, image, -x0, -y0);
+    cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+    cairo_paint(cr);
+    cairo_destroy(cr);
+    cairo_status_t status = cairo_surface_write_to_png(part, dst);
+    cairo_surface_destroy(part);
+    cairo_surface_destroy(image);
+    if (status != CAIRO_STATUS_SUCCESS) {
+        lua_pushnil(L);
+        lua_pushstring(L, cairo_status_to_string(status));
+        return 2;
+    }
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+/* shell.clipboard() -> value, kind: the text on the clipboard ("text"), or
+ * the path of the picture ("image"), or nil. */
+static int l_clipboard(lua_State *L) {
+    const char *kind = NULL;
+    const char *value = shell_clipboard_current(&kind);
+    if (!value) return 0;
+    lua_pushstring(L, value);
+    lua_pushstring(L, kind);
+    return 2;
+}
+
+/* shell.set_clipboard(text) or shell.set_clipboard{path = picture}: the
+ * shell serves it as the clipboard, until something else is copied. */
+static int l_set_clipboard(lua_State *L) {
+    if (lua_type(L, 1) == LUA_TSTRING) {
+        size_t len;
+        const char *text = lua_tolstring(L, 1, &len);
+        lua_pushboolean(L, shell_clipboard_set("text/plain;charset=utf-8", text, len));
+        return 1;
+    }
+    luaL_checktype(L, 1, LUA_TTABLE);
+    lua_getfield(L, 1, "path");
+    const char *path = luaL_checkstring(L, -1);
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (size <= 0 || size > 64L * 1024 * 1024) {
+        fclose(f);
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    char *data = malloc((size_t)size);
+    bool ok = data && fread(data, 1, (size_t)size, f) == (size_t)size;
+    fclose(f);
+    const char *mime = "application/octet-stream";
+    if (ok && size >= 8 && !memcmp(data, "\x89PNG", 4)) mime = "image/png";
+    else if (ok && size >= 3 && (unsigned char)data[0] == 0xFF && (unsigned char)data[1] == 0xD8) mime = "image/jpeg";
+    else if (ok && size >= 12 && !memcmp(data, "RIFF", 4) && !memcmp(data + 8, "WEBP", 4)) mime = "image/webp";
+    ok = ok && shell_clipboard_set(mime, data, (size_t)size);
+    free(data);
+    if (ok) shell_clipboard_note_image(path);
+    lua_pushboolean(L, ok);
+    return 1;
+}
+
+static int l_clipboard_available(lua_State *L) {
+    lua_pushboolean(L, shell_clipboard_available());
     return 1;
 }
 
@@ -2439,6 +2553,10 @@ static const luaL_Reg api[] = {
     { "shortcuts", l_shortcuts },
     { "toggle_shortcuts", l_toggle_shortcuts },
     { "screenshot", l_screenshot },
+    { "image_crop", l_image_crop },
+    { "clipboard", l_clipboard },
+    { "set_clipboard", l_set_clipboard },
+    { "clipboard_available", l_clipboard_available },
     { "notify", l_notify },
     { "notification_server", l_notification_server },
     { "notifications", l_notifications },

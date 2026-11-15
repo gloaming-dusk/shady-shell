@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Settings
+Comment=Appearance, windows, input, dock, clipboard and notifications
+Exec=shady-settings
+Icon=preferences-system
+Categories=Settings;System;

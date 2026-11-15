@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "shady-shell-v1-client-protocol.h"
+#include "clipboard.h"
 #include "compositor.h"
 #include "notify.h"
 #include "plugins.h"
@@ -167,6 +168,7 @@ static void output_removed(void *data, struct shell_output *output) {
 static void global(void *data, struct wl_registry *registry, uint32_t name,
         const char *interface, uint32_t version) {
     struct shell *shell = data;
+    if (shell_clipboard_global(registry, name, interface, version)) return;
     if (strcmp(interface, shady_shell_v1_interface.name) != 0 || shell->protocol) return;
     shell->protocol = wl_registry_bind(registry, name, &shady_shell_v1_interface,
         version < 4 ? version : 4);
@@ -199,6 +201,7 @@ int main(int argc, char **argv) {
         goto out;
     }
     shell_compositor_init(&shell);
+    shell_clipboard_init(&shell);
     shell_plugins_init(&shell);
     if (!shell_lua_init(&shell)) {
         fprintf(stderr, "shady-shell: no usable shell config\n");
@@ -214,6 +217,7 @@ out:
     shell_lua_finish(&shell);
     shell_plugins_finish();
     shell_compositor_finish();
+    shell_clipboard_finish();
     if (shell.protocol) shady_shell_v1_destroy(shell.protocol);
     shell_core_finish(&shell.core);
     return status;

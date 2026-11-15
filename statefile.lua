@@ -4,10 +4,12 @@
 --     local state = require("statefile")("my-rice")
 --     state.get("dnd")            -- a string, or nil
 --     state.set("dnd", "1")       -- nil removes the key; the file is rewritten
+--     state.watch(function() ... end) -- another process changed the file
 --
 -- Values are strings (numbers are written with tostring). Each name is
--- read once, when it is first asked for, and the same table is returned
--- for the same name.
+-- read when it is first asked for, and again by reload() or when a watch
+-- sees the file change; the same table is returned for the same name.
+-- Writes replace the file at once, so a reader never sees half of one.
 
 local stores = {}
 
@@ -42,20 +44,49 @@ return function(name)
         return values[key]
     end
 
+    local written -- what this process wrote last, so its own write is not news
     function store.set(key, value)
         if not values then load() end
-        values[key] = value ~= nil and tostring(value) or nil
-        local f = io.open(path, "w")
+        values[key] = value ~= nil and tostring(value):gsub("\n", " ") or nil
+        local temporary = path .. ".new"
+        local f = io.open(temporary, "w")
         if not f then
             os.execute(string.format("mkdir -p %q", folder))
-            f = io.open(path, "w")
+            f = io.open(temporary, "w")
             if not f then return false end
         end
         local keys = {}
         for k in pairs(values) do keys[#keys + 1] = k end
         table.sort(keys)
-        for _, k in ipairs(keys) do f:write(k, "=", values[k], "\n") end
+        local lines = {}
+        for _, k in ipairs(keys) do lines[#lines + 1] = k .. "=" .. values[k] .. "\n" end
+        written = table.concat(lines)
+        f:write(written)
         f:close()
+        return os.rename(temporary, path) ~= nil
+    end
+
+    function store.reload() load() end
+
+    -- fn() runs after another process changed the file (and it was read
+    -- again). Needs a shell with shell.watch.
+    local watchers
+    function store.watch(fn)
+        if not shell or not shell.watch then return false end
+        if not watchers then
+            watchers = {}
+            os.execute(string.format("mkdir -p %q", folder))
+            shell.watch(path, function()
+                local f = io.open(path, "r")
+                local now = f and f:read("a") or ""
+                if f then f:close() end
+                if now == written then return end
+                written = now
+                load()
+                for _, w in ipairs(watchers) do w() end
+            end)
+        end
+        watchers[#watchers + 1] = fn
         return true
     end
 

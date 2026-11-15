@@ -40,6 +40,11 @@ stdenv.mkDerivation {
       ../machine.lua
       ../statefile.lua
       ../toasts.lua
+      ../clipboard.lua
+      ../dock.lua
+      ../screenshot.lua
+      ../apps
+      ../data
       ../bin
       ../examples
       ../fonts

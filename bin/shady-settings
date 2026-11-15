@@ -1,0 +1,23 @@
+#!/bin/sh
+# Shady Settings: the desktop's appearance, windows, input, dock,
+# clipboard and notifications (apps/settings.lua, run by shady-shell --app).
+#
+#   shady-settings [PAGE]   PAGE: appearance, windows, input, dock,
+#                           clipboard or notifications
+set -eu
+here=$(dirname "$(readlink -f "$0")")
+[ $# -ge 1 ] && export SHADY_SETTINGS_PAGE="$1"
+
+shell=""
+for candidate in "$here/shady-shell" "$here/../build/shady-shell"; do
+    if [ -x "$candidate" ]; then shell=$candidate; break; fi
+done
+[ -n "$shell" ] || shell=$(command -v shady-shell || true)
+[ -n "$shell" ] || { echo "shady-settings: no shady-shell" >&2; exit 1; }
+
+for app in "${SHADY_SHELL_DATA_DIR:-/nonexistent}/apps/settings.lua" \
+        "$here/../share/shady/shell/apps/settings.lua" "$here/../apps/settings.lua"; do
+    [ -f "$app" ] && exec "$shell" --app "$app"
+done
+echo "shady-settings: apps/settings.lua not found" >&2
+exit 1
