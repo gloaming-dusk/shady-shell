@@ -99,7 +99,11 @@ static void protocol_window(void *data, struct shady_shell_v1 *protocol, uint32_
     copy_text(window->app_id, sizeof(window->app_id), app_id);
     copy_text(window->title, sizeof(window->title), title);
     copy_text(window->workspace, sizeof(window->workspace), workspace);
+    bool was_focused = window->focused;
     window->focused = focused != 0;
+    /* A window newly taking the focus (after the first snapshot) is focus
+     * leaving the shell's popups. */
+    if (window->focused && !was_focused && shell->snapshot_done) shell_lua_window_focused(shell);
     /* Focus is exclusive, but the compositor only re-sends the newly focused
      * window, so clear the previous holder here. */
     if (window->focused) {

@@ -176,7 +176,7 @@ install_data('default.lua', 'shortcut_overlay.lua', 'wallpaper.lua',
   'almanac.lua', 'commands.lua', 'focus_timer.lua', 'launches.lua', 'lockscreen.lua', 'machine.lua',
   'statefile.lua', 'toasts.lua',
   # Parts with a default look a rice can restyle.
-  'clipboard.lua', 'dock.lua', 'screenshot.lua',
+  'clipboard.lua', 'dock.lua', 'screenshot.lua', 'settings_app.lua',
   install_dir: shell_data_install_dir)
 foreach dir : ['apps', 'examples', 'fonts', 'meridian', 'shaders']
   install_subdir(dir, install_dir: shell_data_install_dir)

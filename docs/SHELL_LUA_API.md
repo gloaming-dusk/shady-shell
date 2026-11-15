@@ -100,10 +100,15 @@ shell.popup {
 }
 ```
 
-With `close_on_blur = true` (and a `keyboard` mode that takes the keyboard)
-the popup closes when the keyboard moves elsewhere: a click on a window, or
-another popup opening. Clicks on the desktop or on a bar, which take no
-keyboard, leave it open.
+With `close_on_blur = true` the popup closes when focus leaves it: the
+keyboard moving elsewhere (with a `keyboard` mode that takes it), another
+window taking the focus, or a click anywhere else but on a bar or a dock.
+While such a popup is open the shell lays an invisible surface over the
+windows (on the `top` layer, kept off the zones bars and docks reserve)
+and lets its desktop surfaces take the whole pointer, so a click on any
+window, the focused one included, or on the desktop reaches the shell and
+closes the popup instead. Clicks on a bar or a dock still go to them: a
+bar's button often toggles the popup itself.
 
 With `text_input = true` (and a `keyboard` mode) the popup takes text from
 the input method, through text-input-v3: what is still being composed is
@@ -651,7 +656,9 @@ Each file documents its options at the top.
 
 ## The Settings app
 
-`shady-settings [page]` (`shady-shell --app apps/settings.lua`) sets the
+`shady-settings [page]` (`shady-shell --app apps/settings.lua`; from a rice,
+`require("settings_app").open([page])`, which finds the launcher of the
+shady-shell that is running) sets the
 accent, the wallpaper (from thumbnails of `~/Pictures`, `~/Pictures/Wallpapers`
 and `~/.config/shady/wallpapers`), window corners and gaps, the keyboard
 and touchpad, the dock's pins, how much clipboard history is kept, and

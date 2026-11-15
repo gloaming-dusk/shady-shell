@@ -21,6 +21,8 @@
 --   notify    false: no notification
 --   palette   accent, surface, text, text_dim (default shell.theme; a
 --             function is called on every repaint)
+--   margin    the toolbar's distance from the bottom (default 36), to
+--             clear a dock
 --   font, bold
 
 local M = {}
@@ -209,7 +211,7 @@ local function toolbar(ctx, p)
     local ready = target(ctx) ~= nil
     local hints = { region = "Drag to select · drag inside to move", window = "Choose a window",
         screen = "The whole screen" }
-    return shell.column { bottom = 36, left = 0, right = 0, align = "center", gap = 8,
+    return shell.column { bottom = opts.margin or 36, left = 0, right = 0, align = "center", gap = 8,
         windows and shell.row { padding = 8, radius = 14, background = a(p.surface, 0.92), windows } or false,
         shell.row { padding = 6, gap = 6, radius = 16, background = a(p.surface, 0.94),
             shadow = { 0, 8, a("#000000", 0.3), 20 },
@@ -225,8 +227,9 @@ local function toolbar(ctx, p)
                 on_click = function() shell.close(opts.name) end,
                 shell.icon("close", { size = 13, color = p.text_dim }) },
         },
-        shell.text(hints[pick.mode] .. "   ·   Tab mode   ↵ take   Esc cancel",
-            { font = opts.small, color = "#FFFFFF" }),
+        shell.row { height = 24, radius = 12, padding = { 0, 12 }, background = a("#000000", 0.55),
+            shell.text(hints[pick.mode] .. "   ·   Tab mode   ↵ take   Esc cancel",
+                { font = opts.small, color = "#FFFFFF" }) },
     }
 end
 
