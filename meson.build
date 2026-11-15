@@ -1,4 +1,4 @@
-project('shady-shell', 'c', version: '0.2.0',
+project('shady-shell', 'c', version: '0.3.0',
   meson_version: '>=1.1',
   default_options: ['buildtype=debugoptimized', 'c_std=c11', 'warning_level=2'])
 

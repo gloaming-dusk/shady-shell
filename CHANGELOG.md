@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (2026-11-15)
 
 - `close_on_blur` closes a popup whenever focus leaves it: a click on any
   window (the focused one too), on the desktop, or another window taking the
