@@ -1,5 +1,7 @@
 -- A bar for headless-shell-press: a key with a `press` style, sticker
--- lettering, and the icon shell.apps finds for an application.
+-- lettering, the icon shell.apps finds for an application, and a slider
+-- whose drag must end when the pointer leaves the bar.
+local drags = 0
 shell.bar {
     name = "press-bar",
     edge = "top",
@@ -11,6 +13,11 @@ shell.bar {
             background = "#202020", padding = { 0, 10 }, gap = 20,
             shell.box { id = "key", width = 40, height = 40, background = "#ff0000", animate = false,
                 press = { background = "#00ff00" }, on_click = function() end },
+            shell.box { width = 120, height = 30, background = "#404040",
+                on_drag = function(info)
+                    drags = drags + 1
+                    shell.log("drag=" .. drags .. (info.done and " done" or ""))
+                end },
             shell.text("O", { font = "Sans Bold 30", color = "#ffffff", outline = { 4, "#0000ff" },
                 text_shadow = { 0, 8, "#ffff00" } }),
         }

@@ -645,8 +645,13 @@ static void view_leave(void *data, struct shell_surface *surface) {
     (void)surface;
     struct view *view = data;
     view->pointer_in = false;
-    if (view->drag == LUA_NOREF) view->holding = false;
+    view->holding = false;
     if (!view->closing) set_hover(view, NULL);
+    /* A drag ends when the pointer leaves: the compositor sends the
+     * release to whatever is under the pointer then, not to this surface,
+     * and a drag left running would follow the pointer when it comes back.
+     * The handler may close this view; nothing touches it afterwards. */
+    if (view->drag != LUA_NOREF) call_drag(view, true);
 }
 
 static const char *button_name(uint32_t button) {
