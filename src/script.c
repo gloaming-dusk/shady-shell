@@ -118,6 +118,7 @@ struct view {
     uint64_t pending_hash, painted_hash;
     bool painted;
     unsigned hover_serial, painted_hover;
+    bool holding; /* the left button is down: the hovered widget is pressed */
     bool stepped; /* view_damage already advanced the springs for this paint */
 };
 
@@ -522,6 +523,7 @@ static bool view_damage(void *data, struct shell_surface *surface, cairo_t *cr, 
     }
     ui_anims_begin_frame(view->anims);
     double dt = step_time(view);
+    ui_pressed = view->holding ? view->hovered : NULL;
     bool moving = ui_anims_step(view->anims, view->tree, view->hovered, &defaults, dt, false);
     view->stepping = moving;
     surface->animating = moving;
@@ -530,6 +532,7 @@ static bool view_damage(void *data, struct shell_surface *surface, cairo_t *cr, 
     cairo_rectangle(cr, 0, 0, 0, 0);
     cairo_clip(cr);
     ui_draw_recording = true;
+    ui_pressed = view->holding ? view->hovered : NULL;
     ui_draw(cr, view->tree, view->hovered, &defaults);
     ui_draw_recording = false;
     cairo_restore(cr);
@@ -574,11 +577,13 @@ static void view_draw(void *data, struct shell_surface *surface, cairo_t *cr,
     } else {
         ui_anims_begin_frame(view->anims);
         double dt = step_time(view);
+        ui_pressed = view->holding ? view->hovered : NULL;
         moving = ui_anims_step(view->anims, view->tree, view->hovered, &defaults, dt,
             view->closing);
         view->stepping = moving;
         surface->animating = moving;
     }
+    ui_pressed = view->holding ? view->hovered : NULL;
     ui_draw(cr, view->tree, view->hovered, &defaults);
     collect_effects(view, surface, view->tree, width, height);
     const struct ui_node *caret = view->def->text_input ? find_caret(view->tree) : NULL;
@@ -640,6 +645,7 @@ static void view_leave(void *data, struct shell_surface *surface) {
     (void)surface;
     struct view *view = data;
     view->pointer_in = false;
+    if (view->drag == LUA_NOREF) view->holding = false;
     if (!view->closing) set_hover(view, NULL);
 }
 
@@ -696,6 +702,13 @@ static void view_button(void *data, struct shell_surface *surface, uint32_t butt
     (void)surface;
     struct view *view = data;
     if (!view->tree || view->closing) return;
+    if (button == 0x110 && view->holding != pressed) {
+        /* A widget with a `press` style shows it while the button is down.
+         * Like hover, it is not in the tree: paint the whole surface. */
+        view->holding = pressed;
+        view->hover_serial++;
+        shell_surface_redraw(view->surface);
+    }
     if (!pressed) {
         if (button == 0x110 && view->drag != LUA_NOREF) call_drag(view, true);
         return;
@@ -1329,14 +1342,19 @@ static int l_apps(lua_State *L) {
     size_t count = apps_matching(shell, query, matches, (size_t)limit);
     lua_createtable(L, (int)count, 0);
     for (size_t i = 0; i < count; i++) {
-        const struct launcher_app *app = &shell->apps[matches[i]];
-        lua_createtable(L, 0, 2);
+        struct launcher_app *app = &shell->apps[matches[i]];
+        lua_createtable(L, 0, 4);
         lua_pushstring(L, app->name);
         lua_setfield(L, -2, "name");
         lua_pushstring(L, app->exec);
         lua_setfield(L, -2, "exec");
         lua_pushstring(L, app->categories);
         lua_setfield(L, -2, "categories");
+        const char *icon = apps_icon(app);
+        if (icon) {
+            lua_pushstring(L, icon);
+            lua_setfield(L, -2, "icon");
+        }
         lua_rawseti(L, -2, (lua_Integer)i + 1);
     }
     return 1;

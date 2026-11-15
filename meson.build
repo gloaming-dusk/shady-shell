@@ -171,7 +171,7 @@ executable('ime-probe',
 # The Lua UI and its data; the C sources stay behind.
 # The modules a config builds on (no look of their own), and the default UI.
 install_data('default.lua', 'shortcut_overlay.lua', 'wallpaper.lua',
-  'almanac.lua', 'commands.lua', 'focus_timer.lua', 'lockscreen.lua', 'machine.lua',
+  'almanac.lua', 'commands.lua', 'focus_timer.lua', 'launches.lua', 'lockscreen.lua', 'machine.lua',
   'statefile.lua', 'toasts.lua',
   install_dir: shell_data_install_dir)
 foreach dir : ['examples', 'fonts', 'meridian', 'shaders']

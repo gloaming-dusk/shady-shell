@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- `press = {...}`: a style a widget wears while the left button holds it
+  down, over `hover`. With a spring it is a key that sinks and springs back.
+- Spring presets `"pop"` (jumps past its target and settles), `"jelly"`
+  (wobbles) and `"clack"` (a key going down and back).
+- Text takes `outline = {width, colour}` and `text_shadow = {x, y,
+  colour}`: a stroke around the glyphs, and a hard shadow shaped like them.
+- `shell.apps` gives each application's `icon`: the PNG its `Icon=` names
+  in the hicolor theme or `pixmaps`.
+- `require("launches")`: which applications are launched, how often and how
+  lately, for launchers and docks to put the usual ones first.
+- Damage tracking counts widgets that ride on an animated parent without
+  being animated themselves (tape on a card that springs in), so what
+  sticks out of the parent is repainted too.
+- The lockscreen module leaves the fingerprint reader alone with
+  `SHADY_SHELL_OFFLINE=1`, so headless runs no longer reach the machine's
+  real reader.
+
 - Modules without a look, for rices to build their parts on (see
   [Modules without a look](docs/SHELL_LUA_API.md#modules-without-a-look)):
   `machine` (sound, light, power, radios, music, load, the session),

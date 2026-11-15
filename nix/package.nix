@@ -35,6 +35,7 @@ stdenv.mkDerivation {
       ../almanac.lua
       ../commands.lua
       ../focus_timer.lua
+      ../launches.lua
       ../lockscreen.lua
       ../machine.lua
       ../statefile.lua

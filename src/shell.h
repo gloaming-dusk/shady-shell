@@ -22,6 +22,7 @@
 #define APP_NAME_MAX 128
 #define APP_EXEC_MAX 512
 #define APP_CATEGORIES_MAX 256
+#define APP_ICON_MAX 256
 
 struct shady_shell_v1;
 struct shell_lua;
@@ -40,6 +41,8 @@ struct launcher_app {
     char name[APP_NAME_MAX];
     char exec[APP_EXEC_MAX];
     char categories[APP_CATEGORIES_MAX]; /* Categories=, as written */
+    char icon[APP_ICON_MAX]; /* Icon=, as written */
+    char *icon_path; /* the picture it names, once looked for ("" for none) */
 };
 
 struct shell {
@@ -74,5 +77,8 @@ void apps_load(struct shell *shell);
 /* Indices of up to `max` apps whose name or command contains `query`. */
 size_t apps_matching(struct shell *shell, const char *query, size_t *out, size_t max);
 void apps_spawn(const char *command);
+/* The PNG the app's Icon= names, from the hicolor theme or pixmaps in the
+ * XDG data directories; NULL when there is none. Looked up once. */
+const char *apps_icon(struct launcher_app *app);
 
 #endif

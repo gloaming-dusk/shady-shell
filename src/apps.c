@@ -54,7 +54,7 @@ static void add_desktop_file(struct shell *shell, const char *path) {
     if (!f) return;
 
     char line[1024], name[APP_NAME_MAX] = {0}, exec[APP_EXEC_MAX] = {0};
-    char categories[APP_CATEGORIES_MAX] = {0};
+    char categories[APP_CATEGORIES_MAX] = {0}, icon[APP_ICON_MAX] = {0};
     bool in_entry = false, hidden = false, nodisplay = false, application = true;
     while (fgets(line, sizeof(line), f)) {
         size_t len = strlen(line);
@@ -70,6 +70,7 @@ static void add_desktop_file(struct shell *shell, const char *path) {
         if (!strcmp(line, "Name")) copy_text(name, sizeof(name), eq);
         else if (!strcmp(line, "Exec")) copy_text(exec, sizeof(exec), eq);
         else if (!strcmp(line, "Categories")) copy_text(categories, sizeof(categories), eq);
+        else if (!strcmp(line, "Icon")) copy_text(icon, sizeof(icon), eq);
         else if (!strcmp(line, "Hidden")) hidden = desktop_truthy(eq);
         else if (!strcmp(line, "NoDisplay")) nodisplay = desktop_truthy(eq);
         else if (!strcmp(line, "Type")) application = strcmp(eq, "Application") == 0;
@@ -81,6 +82,8 @@ static void add_desktop_file(struct shell *shell, const char *path) {
     copy_text(app->name, sizeof(app->name), name);
     sanitize_exec(app->exec, sizeof(app->exec), exec);
     copy_text(app->categories, sizeof(app->categories), categories);
+    copy_text(app->icon, sizeof(app->icon), icon);
+    app->icon_path = NULL;
     if (!app->exec[0]) return;
     shell->app_count++;
 }
@@ -147,4 +150,54 @@ void apps_spawn(const char *command) {
         perror("shady-shell: could not execute application shell");
         _exit(127);
     }
+}
+
+/* ---- icons ----------------------------------------------------------------- */
+
+static bool readable(const char *path) { return access(path, R_OK) == 0; }
+
+/* <base>/icons/hicolor/<size>/apps/<name>.png, larger sizes first (they
+ * are drawn at launcher size and scaled down), then <base>/pixmaps. */
+static bool icon_in(const char *base, const char *name, char *out, size_t size) {
+    static const char *const sizes[] = { "128x128", "256x256", "96x96", "192x192", "512x512",
+        "64x64", "48x48", "1024x1024", "32x32" };
+    if (!base || !*base) return false;
+    for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
+        snprintf(out, size, "%s/icons/hicolor/%s/apps/%s.png", base, sizes[i], name);
+        if (readable(out)) return true;
+    }
+    snprintf(out, size, "%s/pixmaps/%s.png", base, name);
+    return readable(out);
+}
+
+static char *find_icon(const char *name) {
+    char path[4096];
+    if (!name[0]) return strdup("");
+    if (name[0] == '/') {
+        size_t len = strlen(name);
+        bool png = len > 4 && !strcasecmp(name + len - 4, ".png");
+        return strdup(png && readable(name) ? name : "");
+    }
+    const char *home = getenv("HOME");
+    const char *xdg_home = getenv("XDG_DATA_HOME");
+    char local[4096] = "";
+    if (xdg_home && *xdg_home) snprintf(local, sizeof(local), "%s", xdg_home);
+    else if (home && *home) snprintf(local, sizeof(local), "%s/.local/share", home);
+    if (icon_in(local, name, path, sizeof(path))) return strdup(path);
+    const char *dirs = getenv("XDG_DATA_DIRS");
+    if (!dirs || !*dirs) dirs = "/usr/local/share:/usr/share";
+    char *copy = strdup(dirs);
+    char *found = NULL;
+    if (copy) {
+        char *save = NULL;
+        for (char *p = strtok_r(copy, ":", &save); p && !found; p = strtok_r(NULL, ":", &save))
+            if (icon_in(p, name, path, sizeof(path))) found = strdup(path);
+        free(copy);
+    }
+    return found ? found : strdup("");
+}
+
+const char *apps_icon(struct launcher_app *app) {
+    if (!app->icon_path) app->icon_path = find_icon(app->icon);
+    return app->icon_path && app->icon_path[0] ? app->icon_path : NULL;
 }

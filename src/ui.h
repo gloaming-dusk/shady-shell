@@ -121,8 +121,8 @@ struct ui_node {
     /* Placement inside a stack; NAN when unset. */
     double left, top, right, bottom;
 
-    struct ui_style style, hover;
-    bool has_hover;
+    struct ui_style style, hover, press;
+    bool has_hover, has_press; /* press: while the left button holds it down */
 
     /* Transitions: `animate` springs the node's rectangle and style towards
      * each new tree's values; `enter` is where a new node starts from and
@@ -146,6 +146,13 @@ struct ui_node {
     int max_lines; /* with wrap: ellipsize after this many; 0 for no limit */
     double wrap_width; /* the width the text wraps at; 0 when it is one line */
     double wrap_limit; /* narrower width layout gave it; the next measure wraps there */
+    /* Sticker lettering: a stroke around the glyphs, under their fill, and
+     * a hard copy of the outlined glyphs offset behind them. Both make the
+     * text's box larger by what they add. */
+    double outline_width, outline_color[4];
+    bool has_outline;
+    double text_shadow[2], text_shadow_color[4];
+    bool has_text_shadow;
     PangoLayout *layout;
 
     double pip_radius;
@@ -217,7 +224,12 @@ void ui_measure(cairo_t *cr, struct ui_node *node, const struct ui_defaults *def
 bool ui_layout(cairo_t *cr, struct ui_node *node, double x, double y, double w, double h);
 void ui_arrange(cairo_t *cr, struct ui_node *node, const struct ui_defaults *defaults,
     double x, double y, double w, double h);
-/* The node's style with `hover` applied when it is the hovered node. */
+/* The node held down by the left button, if any: ui_resolve_style applies
+ * its `press` style. The owner of the tree sets it before stepping and
+ * drawing. */
+extern const struct ui_node *ui_pressed;
+/* The node's style with `hover` applied when it is the hovered node, and
+ * `press` when it is ui_pressed. */
 void ui_resolve_style(const struct ui_node *node, const struct ui_node *hovered,
     struct ui_style *out);
 /* Copy into `out` the fields `over` sets. */
